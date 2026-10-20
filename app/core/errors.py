@@ -32,6 +32,30 @@ class ModelProviderError(ApplicationError):
     code = "model_provider_error"
 
 
+class RepositoryNotAuthorizedError(ApplicationError):
+    status_code = 404
+    code = "repository_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("Repository is not configured for analysis.")
+
+
+class RepositoryLimitError(ApplicationError):
+    status_code = 413
+    code = "repository_limit_exceeded"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class RepositoryAnalysisTimeoutError(ApplicationError):
+    status_code = 504
+    code = "repository_analysis_timeout"
+
+    def __init__(self) -> None:
+        super().__init__("Repository analysis exceeded its processing time limit.")
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     @application.exception_handler(ApplicationError)
     async def application_error_handler(_: Request, exc: ApplicationError) -> JSONResponse:

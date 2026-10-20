@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from pydantic import Field, SecretStr, field_validator
@@ -16,6 +17,13 @@ class Settings(BaseSettings):
     nebius_model: str = "nvidia/nemotron-3-super-120b-a12b"
     nebius_api_key: SecretStr | None = None
     nebius_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
+    inference_provider: str = "nebius"
+    authorized_repositories: dict[str, Path] = Field(default_factory=dict)
+    repository_max_files: int = Field(default=2_000, gt=0, le=20_000)
+    repository_max_file_size_bytes: int = Field(default=1_000_000, gt=0, le=20_000_000)
+    repository_max_total_bytes: int = Field(default=20_000_000, gt=0, le=200_000_000)
+    repository_max_depth: int = Field(default=20, gt=0, le=100)
+    repository_max_processing_seconds: float = Field(default=10.0, gt=0, le=120)
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -52,6 +60,24 @@ class Settings(BaseSettings):
         if level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
             raise ValueError("LOG_LEVEL must be a standard logging level")
         return level
+
+    @field_validator("inference_provider")
+    @classmethod
+    def validate_inference_provider(cls, value: str) -> str:
+        provider = value.strip().lower()
+        if provider not in {"nebius", "mock"}:
+            raise ValueError("INFERENCE_PROVIDER must be 'nebius' or 'mock'")
+        return provider
+
+    @field_validator("authorized_repositories")
+    @classmethod
+    def validate_authorized_repositories(cls, value: dict[str, Path]) -> dict[str, Path]:
+        for repository_id, path in value.items():
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", repository_id):
+                raise ValueError("Authorized repository IDs must be simple identifiers")
+            if not path.is_absolute():
+                raise ValueError("Authorized repository roots must be absolute paths")
+        return value
 
 
 @lru_cache

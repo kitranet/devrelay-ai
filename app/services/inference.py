@@ -1,12 +1,27 @@
-"""Application service coordinating validated inference requests."""
+"""Application service and explicit provider selection for model inference."""
 
+from typing import Protocol
+
+from app.core.config import Settings
 from app.integrations.nebius import NebiusClient
-from app.models.inference import InferenceRequest, InferenceResponse
+from app.models.inference import ChatMessage, InferenceRequest, InferenceResponse
+from app.services.mock_inference import MockModelProvider
+
+
+class InferenceProvider(Protocol):
+    async def complete(self, messages: list[ChatMessage], max_tokens: int = 1024) -> InferenceResponse: ...
 
 
 class InferenceService:
-    def __init__(self, model_client: NebiusClient) -> None:
-        self._model_client = model_client
+    def __init__(self, provider: InferenceProvider) -> None:
+        self._provider = provider
 
     async def generate(self, request: InferenceRequest) -> InferenceResponse:
-        return await self._model_client.complete(request.messages, max_tokens=request.max_tokens)
+        return await self._provider.complete(request.messages, max_tokens=request.max_tokens)
+
+
+def build_inference_service(settings: Settings) -> InferenceService:
+    """Select exactly one configured provider; provider failures never fall back."""
+    if settings.inference_provider == "mock":
+        return InferenceService(MockModelProvider())
+    return InferenceService(NebiusClient(settings))

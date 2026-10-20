@@ -1,5 +1,7 @@
 """Inference API schemas."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -16,3 +18,5 @@ class InferenceRequest(BaseModel):
 class InferenceResponse(BaseModel):
     model: str
     content: str
+    provider: Literal["nebius", "mock"] = "nebius"
+    is_mock: bool = False

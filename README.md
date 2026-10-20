@@ -13,7 +13,7 @@ python -m pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-The health check is available at `http://127.0.0.1:8000/health`. API docs are at `/docs`.
+The health check is available at `http://127.0.0.1:8000/health`. Repository analysis is available at `POST /api/v1/repositories/analyze`; configure authorized repository IDs first as described in [docs/setup.md](docs/setup.md). API docs are at `/docs`.
 
 ## Project docs
 
