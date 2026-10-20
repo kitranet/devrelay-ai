@@ -1,6 +1,6 @@
 # DevRelay AI
 
-An open-source autonomous engineering handoff agent powered by NVIDIA Nemotron and Nebius. This repository currently contains the Phase 1 Python backend foundation.
+An open-source engineering handoff agent powered by NVIDIA Nemotron and Nebius. The Python backend provides bounded static repository analysis and evidence-backed engineering task planning. Planning produces proposals only; it does not edit or execute repository code.
 
 ## Quick start
 
@@ -13,7 +13,9 @@ python -m pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-The health check is available at `http://127.0.0.1:8000/health`. Repository analysis is available at `POST /api/v1/repositories/analyze`; configure authorized repository IDs first as described in [docs/setup.md](docs/setup.md). API docs are at `/docs`.
+The health check is available at `http://127.0.0.1:8000/health`. Repository analysis is available at `POST /api/v1/repositories/analyze`, and planning at `POST /api/v1/tasks/plan`; configure authorized repository IDs first as described in [docs/setup.md](docs/setup.md). API docs are at `/docs`.
+
+For offline planning, set `INFERENCE_PROVIDER=mock`. The deterministic mock supports only named synthetic evaluation scenarios; unsupported requests return an explicit unsupported result. It does not represent NVIDIA Nemotron output.
 
 ## Project docs
 

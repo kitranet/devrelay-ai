@@ -56,6 +56,30 @@ class RepositoryAnalysisTimeoutError(ApplicationError):
         super().__init__("Repository analysis exceeded its processing time limit.")
 
 
+class TaskPlanningTimeoutError(ApplicationError):
+    status_code = 504
+    code = "task_planning_timeout"
+
+    def __init__(self) -> None:
+        super().__init__("Engineering task planning exceeded its processing time limit.")
+
+
+class TaskPlanValidationError(ApplicationError):
+    status_code = 502
+    code = "invalid_task_plan"
+
+    def __init__(self) -> None:
+        super().__init__("The configured inference provider returned an invalid task plan.")
+
+
+class TaskPlanningContextLimitError(ApplicationError):
+    status_code = 413
+    code = "task_context_limit_exceeded"
+
+    def __init__(self) -> None:
+        super().__init__("Repository context exceeds the configured planning limit.")
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     @application.exception_handler(ApplicationError)
     async def application_error_handler(_: Request, exc: ApplicationError) -> JSONResponse:

@@ -36,6 +36,8 @@ Set values in the local, git-ignored `.env` file or the process environment. `NE
 | `REPOSITORY_MAX_TOTAL_BYTES` | `20000000` | Maximum combined file sizes |
 | `REPOSITORY_MAX_DEPTH` | `20` | Maximum relative path depth |
 | `REPOSITORY_MAX_PROCESSING_SECONDS` | `10` | Scanner processing deadline |
+| `TASK_PLANNING_TIMEOUT_SECONDS` | `60` | Total task-planning deadline |
+| `TASK_CONTEXT_MAX_CHARS` | `16000` | Maximum serialized repository context sent to inference |
 
 For example, configure a repository root in PowerShell with:
 
@@ -46,6 +48,20 @@ $env:AUTHORIZED_REPOSITORIES = '{"devrelay":"C:/DevRelay-AI"}'
 The scanner accepts only the configured ID (`devrelay`) in API requests. It never accepts a client-provided path. Keep this API bound to a trusted local interface; this phase does not implement user authentication or multi-user authorization.
 
 The analysis route is `POST http://127.0.0.1:8000/api/v1/repositories/analyze` with JSON body `{"repository_id":"devrelay"}`. It returns summary counts, repository-relative file and symbol references, imports, dependency manifests, test/config/README paths, and sanitized warnings. It does not read environment files, credentials, SSH keys, or secret directories, and it skips all symlinks and common generated/binary content. It parses Python with `ast` without importing or executing it. File count, individual and aggregate size, depth, and processing time are bounded.
+
+## Task planning API
+
+Request `POST /api/v1/tasks/plan` with a repository ID already configured in `AUTHORIZED_REPOSITORIES`:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/tasks/plan `
+  -ContentType 'application/json' `
+  -Body '{"repository_id":"devrelay","task_description":"Investigate the unfamiliar request parser and its dependencies"}'
+```
+
+The response includes status, relevant files, traceable source references, proposed steps, likely changes, risks, dependencies, validation requirements, provider/mock identity, and approval state. Every plan is `not_started` and requires human approval. A plan with invalid evidence is downgraded to `insufficient_context`; unknown or ambiguous mock tasks return `unsupported`. Clear harmful requests are rejected, and repositories without Python modules return `insufficient_context`. Planning does not modify files or execute repository code. Configure the inference provider explicitly; Nebius errors are never retried via mock.
+
+The offline evaluation scenarios use `tests/fixtures/planning_repo`: a division-by-zero defect (`package/calculator.py`), API input validation (`package/api.py`), and investigation of a function and its imported dependency (`package/service.py`, `package/dependencies.py`). Each scenario has corresponding tests under `tests/`. The mock handles these predefined cases only; evaluation checks structured output, expected paths/tests, and source-reference validity, not AI reasoning quality.
 
 The example environment selects `INFERENCE_PROVIDER=mock` so local development does not need billing access. Set `INFERENCE_PROVIDER=mock` to explicitly select deterministic, offline test responses. Responses identify themselves with `provider="mock"`, `is_mock=true`, and a `devrelay-mock-v1` model name. Mock is never selected automatically after a Nebius error. Phase 2 has no public inference route; the provider is available through the application inference service for local wiring and tests.
 

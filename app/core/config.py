@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     repository_max_total_bytes: int = Field(default=20_000_000, gt=0, le=200_000_000)
     repository_max_depth: int = Field(default=20, gt=0, le=100)
     repository_max_processing_seconds: float = Field(default=10.0, gt=0, le=120)
+    task_planning_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    task_context_max_chars: int = Field(default=16_000, gt=0, le=100_000)
 
     model_config = SettingsConfigDict(
         env_file=".env",

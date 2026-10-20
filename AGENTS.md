@@ -9,5 +9,7 @@
 - Only scan repositories mapped by configured IDs in `AUTHORIZED_REPOSITORIES`; do not accept client-supplied filesystem paths.
 - Keep scanner file count, size, depth, and processing time limits enforced. Skip symlinks, secrets, and generated/binary directories.
 - Mock inference must be selected explicitly and marked with `provider="mock"` and `is_mock=true`; never fall back silently from Nebius errors.
+- Task plans may use only files and line references present in the authorized repository analysis. Keep plans `not_started`, require human approval, and report unsupported evidence rather than inventing it.
+- Planning must remain read-only and static; do not execute or modify analyzed repository code.
 - Run `python -m pytest` before proposing backend changes.
 - Preserve the repository license and existing files unless a task explicitly requests changes.
