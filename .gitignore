@@ -151,7 +151,12 @@ activemq-data/
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
+.secrets/
+credentials/
+secrets/
 .venv
 env/
 venv/
@@ -218,3 +223,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local runtime and generated artifacts
+*.log
+*.sqlite3
+*.db
+*.pem
+*.key
+dist/
+node_modules/
