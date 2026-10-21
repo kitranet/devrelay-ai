@@ -36,6 +36,21 @@ const taskPlan = {
   execution_status: "not_started", assumptions: [], unsupported_references: [], provider: "mock", is_mock: true,
 };
 
+const codeProposal = {
+  proposal_id: "2b7a47fb-5c38-481a-a35c-b4f4cc0d7047", repository_id: "planning-fixture",
+  originating_task_id: "plan-test", task_description: "Fix the division by zero defect",
+  target_files: [{ path: "package/calculator.py", original_sha256: "a".repeat(64), source_reference: { path: "package/calculator.py", line: 1, end_line: 2 } }],
+  proposed_change_summary: "Raise ValueError when denominator is zero.",
+  unified_diff: "--- a/package/calculator.py\n+++ b/package/calculator.py\n@@ -1,2 +1,4 @@\n def divide(numerator, denominator):\n+    if denominator == 0:\n+        raise ValueError('denominator must not be zero')\n     return numerator / denominator\n",
+  risk_classification: "low", validation_findings: [
+    { check: "python_syntax", status: "passed", detail: "AST parse passed without execution." },
+    { check: "runtime_isolation", status: "not_run", detail: "No trusted isolated executor is configured." },
+  ], static_validation_status: "passed", runtime_validation_status: "not_run",
+  runtime_validation_reason: "No trusted isolated executor is configured; repository code was not executed on the host.",
+  provider: "mock", is_mock: true, created_at: "2026-10-21T00:00:00Z",
+  lifecycle_state: "awaiting_review", human_approval_required: true,
+};
+
 describe("DevRelay dashboard", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "ok" })));
@@ -47,7 +62,7 @@ describe("DevRelay dashboard", () => {
     expect(screen.getByRole("heading", { name: /repository intelligence/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /engineering task planner/i })).toBeInTheDocument();
     expect(await screen.findByText("FastAPI is responding")).toBeInTheDocument();
-    expect(screen.getByText("Code changes")).toBeInTheDocument();
+    expect(screen.getByText("Safe code proposals")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
   });
 
@@ -96,6 +111,26 @@ describe("DevRelay dashboard", () => {
     expect(screen.getByText("Execution has not started")).toBeInTheDocument();
     expect(screen.getByText("Inspect division behavior and add a regression test.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/backend/api/v1/tasks/plan", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("creates and displays a mock review proposal without apply actions", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
+      .mockResolvedValueOnce(jsonResponse(taskPlan))
+      .mockResolvedValueOnce(jsonResponse(codeProposal, 201));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
+    expect(await screen.findByRole("heading", { name: "Code change proposal" })).toBeInTheDocument();
+    expect(screen.getByText("Source SHA-256:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Runtime validation: not run")).toBeInTheDocument();
+    expect(screen.getByText(/No files were changed, approved, applied, or executed/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /apply|approve/i })).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/backend/api/v1/proposals/create", expect.objectContaining({ method: "POST" }));
   });
 
   it("shows sanitized backend errors and recovers after dismissal", async () => {

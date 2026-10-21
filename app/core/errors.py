@@ -80,6 +80,35 @@ class TaskPlanningContextLimitError(ApplicationError):
         super().__init__("Repository context exceeds the configured planning limit.")
 
 
+class TaskPlanNotFoundError(ApplicationError):
+    status_code = 404
+    code = "task_plan_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("The task plan is not available in this application session.")
+
+
+class ProposalNotFoundError(ApplicationError):
+    status_code = 404
+    code = "proposal_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("The proposal is not available in this application session.")
+
+
+class ProposalSourceConflictError(ApplicationError):
+    status_code = 409
+    code = "proposal_source_stale"
+
+    def __init__(self) -> None:
+        super().__init__("The target source changed after the task plan was created.")
+
+
+class ProposalValidationError(ApplicationError):
+    status_code = 422
+    code = "proposal_validation_failed"
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     @application.exception_handler(ApplicationError)
     async def application_error_handler(_: Request, exc: ApplicationError) -> JSONResponse:

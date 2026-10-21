@@ -195,6 +195,29 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .execution-state { display: flex; align-items: center; gap: 6px; margin: 12px 0 0; color: #89958d; font-size: 9px; }
 .execution-state span { width: 6px; height: 6px; border-radius: 50%; background: #aab5ac; }
 
+.proposal-action { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; border: 1px solid #e1eae0; border-radius: 8px; padding: 12px; background: #f8fbf7; }
+.proposal-action p { margin: 0; color: #68796e; font-size: 10px; line-height: 1.5; }
+.proposal-result { margin-top: 15px; border: 1px solid #dfe9df; border-radius: 8px; padding: 14px; background: #fbfdfa; }
+.proposal-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid #e9eee8; padding-bottom: 10px; }
+.proposal-heading .eyebrow { margin-bottom: 4px; }
+.proposal-heading h4 { margin: 0; color: #2b4337; font-size: 13px; }
+.proposal-task, .proposal-summary { margin: 10px 0 0; color: #63736a; font-size: 10px; line-height: 1.5; }
+.proposal-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 9px; color: #718078; font-size: 9px; }
+.proposal-target { display: grid; gap: 5px; margin-top: 12px; border: 1px solid #e8ede7; border-radius: 6px; padding: 9px; background: #fff; }
+.proposal-target strong, .proposal-findings h5, .proposal-result > h5 { margin: 0; color: #46594d; font-size: 9px; }
+.proposal-target > code, .proposal-target small code { overflow-wrap: anywhere; color: #4e6a57; font-family: Consolas, "Courier New", monospace; font-size: 8px; }
+.proposal-target small { color: #87938a; font-size: 8px; }
+.proposal-findings { margin-top: 12px; }
+.proposal-findings ul { display: grid; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
+.proposal-findings li { display: flex; align-items: flex-start; gap: 7px; color: #718078; font-size: 9px; line-height: 1.45; }
+.proposal-findings .badge { flex: 0 0 auto; padding: 4px 6px; font-size: 7px; }
+.proposal-result > h5 { margin-top: 13px; }
+.proposal-diff { overflow: auto; max-height: 300px; margin: 7px 0 0; border: 1px solid #e6ebe5; border-radius: 6px; padding: 10px; color: #42574a; background: #f5f8f4; font: 9px/1.55 Consolas, "Courier New", monospace; white-space: pre; }
+.runtime-not-run { margin-top: 11px; border: 1px solid #efdfbe; border-radius: 6px; padding: 9px; background: #fffbf2; }
+.runtime-not-run strong { color: #85601f; font-size: 9px; }
+.runtime-not-run p { margin: 5px 0 0; color: #887955; font-size: 9px; line-height: 1.5; }
+.proposal-safety { margin: 10px 0 0; color: #87938a; font-size: 8px; }
+
 .roadmap-panel { margin-top: 24px; border: 1px solid #e2e8e1; border-radius: 10px; padding: 18px 20px 14px; background: #fafbf8; }
 .roadmap-heading { display: flex; align-items: center; justify-content: space-between; }
 .roadmap-heading .eyebrow { margin-bottom: 5px; }
@@ -248,6 +271,8 @@ h1, h2, h3, h4, p { margin-top: 0; }
   .panel-title p { font-size: 9px; }
   .panel-action-row { align-items: flex-start; flex-direction: column; }
   .panel-action-row .button { align-self: stretch; }
+  .proposal-action { align-items: stretch; flex-direction: column; }
+  .proposal-action .button { width: 100%; }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
   .result-meta { gap: 7px; }
   .roadmap-panel { padding: 15px 13px 12px; }

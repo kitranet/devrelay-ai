@@ -37,4 +37,22 @@ describe("local backend proxy", () => {
     expect(await forbidden.json()).toMatchObject({ error: { code: "backend_configuration_error" } });
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("forwards proposal creation while keeping proposal apply routes unavailable", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"proposal_id":"proposal-id"}', {
+      status: 201, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.BACKEND_API_URL = "http://127.0.0.1:8001";
+    const create = new NextRequest("http://localhost/api/backend/api/v1/proposals/create", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repository_id: "planning-fixture", task_id: "plan-id" }),
+    });
+    const response = await POST(create, { params: Promise.resolve({ path: ["api", "v1", "proposals", "create"] }) });
+    expect(response.status).toBe(201);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://127.0.0.1:8001/api/v1/proposals/create");
+    const apply = new NextRequest("http://localhost/api/backend/api/v1/proposals/proposal-id/apply", { method: "POST", body: "{}" });
+    const unavailable = await POST(apply, { params: Promise.resolve({ path: ["api", "v1", "proposals", "proposal-id", "apply"] }) });
+    expect(unavailable.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -63,9 +63,33 @@ The response includes status, relevant files, traceable source references, propo
 
 The offline evaluation scenarios use `tests/fixtures/planning_repo`: a division-by-zero defect (`package/calculator.py`), API input validation (`package/api.py`), and investigation of a function and its imported dependency (`package/service.py`, `package/dependencies.py`). Each scenario has corresponding tests under `tests/`. The mock handles these predefined cases only; evaluation checks structured output, expected paths/tests, and source-reference validity, not AI reasoning quality.
 
+## Safe proposal API (Phase 4B)
+
+Proposal generation is available only for the fixed synthetic calculator scenario and requires the task plan to have been created earlier in the same running backend process. The API keeps only a bounded number of plans and proposals in memory, so restart clears them.
+
+First create the task plan:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/api/v1/tasks/plan `
+  -ContentType 'application/json' `
+  -Body '{"repository_id":"planning-fixture","task_description":"Fix the division by zero defect in the calculator"}'
+```
+
+Use the returned `task_id` to create a static proposal:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/api/v1/proposals/create `
+  -ContentType 'application/json' `
+  -Body '{"repository_id":"planning-fixture","task_id":"<task_id from plan response>"}'
+```
+
+The response contains the unified diff, target path and source hash, static findings, `provider=mock`, `is_mock=true`, `lifecycle_state=awaiting_review`, and `human_approval_required=true`. Retrieve a proposal with `GET /api/v1/proposals/{proposal_id}`. The source file remains unchanged. No approval or apply route exists. Runtime validation is explicitly `not_run`; the host does not execute repository tests or code. The optional isolated-runtime protocol is not backed by a sandbox implementation. The dashboard exposes the generate button only for this predefined mock plan and displays the diff, findings, hash, and runtime status.
+
+The static checks reject stale source, traversal, absolute paths, duplicate targets, sensitive paths, symlinks/junctions, binary/oversized targets, malformed or oversized diffs, and invalid Python syntax. Proposal generation reuses the existing authorized repository scanner and does not accept client paths or patches. This scenario is intentionally fixed; arbitrary model-authored changes and arbitrary repository modifications are out of scope.
+
 ## Frontend dashboard (local development)
 
-The Next.js dashboard is in `frontend/`. It uses a server-side proxy for only `/health`, repository analysis, and task planning. Configure the backend with the synthetic repository and mock provider from the repository root:
+The Next.js dashboard is in `frontend/`. It uses a server-side proxy for only `/health`, repository analysis, task planning, and proposal creation. Configure the backend with the synthetic repository and mock provider from the repository root:
 
 ```powershell
 $env:INFERENCE_PROVIDER = "mock"

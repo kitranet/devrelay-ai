@@ -4,6 +4,7 @@ const ROUTES = new Map<string, { method: "GET" | "POST"; upstream: string }>([
   ["health", { method: "GET", upstream: "/health" }],
   ["api/v1/repositories/analyze", { method: "POST", upstream: "/api/v1/repositories/analyze" }],
   ["api/v1/tasks/plan", { method: "POST", upstream: "/api/v1/tasks/plan" }],
+  ["api/v1/proposals/create", { method: "POST", upstream: "/api/v1/proposals/create" }],
 ]);
 
 type RouteContext = { params: Promise<{ path: string[] }> };

@@ -1,8 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { analyzeRepository, checkBackend, planTask } from "@/lib/api";
-import type { RepositoryAnalysis, TaskPlan } from "@/lib/types";
+import { analyzeRepository, checkBackend, createProposal, planTask } from "@/lib/api";
+import type { CodeChangeProposal, RepositoryAnalysis, TaskPlan } from "@/lib/types";
 
 type BackendState = "checking" | "connected" | "offline";
 
@@ -33,9 +33,11 @@ export default function Dashboard() {
   const [backendMessage, setBackendMessage] = useState("Checking local API…");
   const [analysis, setAnalysis] = useState<RepositoryAnalysis | null>(null);
   const [plan, setPlan] = useState<TaskPlan | null>(null);
+  const [proposal, setProposal] = useState<CodeChangeProposal | null>(null);
   const [taskDescription, setTaskDescription] = useState("");
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
+  const [proposalBusy, setProposalBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,8 +80,11 @@ export default function Dashboard() {
     setPlanningBusy(true);
     setError(null);
     setPlan(null);
+    setProposal(null);
     try {
-      setPlan(await planTask(repositoryId, taskDescription.trim()));
+      const nextPlan = await planTask(repositoryId, taskDescription.trim());
+      setPlan(nextPlan);
+      if (nextPlan.status === "planned") setProposal(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Task planning failed.");
     } finally {
@@ -87,10 +92,24 @@ export default function Dashboard() {
     }
   }
 
+  async function generateProposal() {
+    if (!plan || !repositoryId) return;
+    setProposalBusy(true);
+    setError(null);
+    try {
+      setProposal(await createProposal(repositoryId, plan.task_id));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Proposal generation failed.");
+    } finally {
+      setProposalBusy(false);
+    }
+  }
+
   function onRepositoryChange(value: string) {
     setRepositoryId(value);
     setAnalysis(null);
     setPlan(null);
+    setProposal(null);
     setError(null);
   }
 
@@ -119,7 +138,7 @@ export default function Dashboard() {
       <main id="overview" className="main-content">
         <section className="welcome-row" aria-labelledby="page-title">
           <div>
-            <p className="eyebrow">ENGINEERING HANDOFF WORKSPACE <span>·</span> PHASE 4A</p>
+            <p className="eyebrow">ENGINEERING HANDOFF WORKSPACE <span>·</span> PHASE 4B</p>
             <h1 id="page-title">Good work starts with <em>context.</em></h1>
             <p className="welcome-copy">Understand a repository. Shape a plan. Keep every next step grounded in evidence.</p>
           </div>
@@ -199,13 +218,15 @@ export default function Dashboard() {
             {!plan && !planningBusy && <EmptyState title="A plan you can inspect" detail="Plans include proposed steps, source evidence, risks and tests. Nothing is changed or executed." />}
             {planningBusy && <div className="loading-block" role="status"><span className="spinner spinner-large" /><span>Preparing repository context…</span></div>}
             {plan && <PlanResult plan={plan} />}
+            {plan?.status === "planned" && plan.is_mock && /division by zero/i.test(plan.task_description) && !proposal && <div className="proposal-action"><p>This fixed mock scenario can produce a review-only patch. The source file will remain unchanged.</p><button className="button button-primary" type="button" onClick={generateProposal} disabled={proposalBusy || backend !== "connected"}>{proposalBusy ? <><span className="spinner" /> Preparing proposal</> : <>Generate code proposal <span aria-hidden="true">→</span></>}</button></div>}
+            {proposal && <ProposalResult proposal={proposal} />}
           </section>
         </div>
 
         <section className="roadmap-panel" aria-labelledby="roadmap-title">
           <div className="roadmap-heading"><div><p className="eyebrow">ON THE HORIZON</p><h2 id="roadmap-title">More ways to move work forward</h2></div><Badge tone="muted">Coming later</Badge></div>
-          <div className="roadmap-items"><RoadmapItem number="03" title="Code changes" detail="Review proposed diffs before anything is applied." /><RoadmapItem number="04" title="Autonomous execution" detail="Isolated validation with explicit human approval." /><RoadmapItem number="05" title="Team handoffs" detail="Share context and decisions across your team." /></div>
-          <p className="unavailable-note">These capabilities are not available in this build.</p>
+          <div className="roadmap-items"><RoadmapItem number="03" title="Safe code proposals" detail="A fixed calculator scenario produces a static, review-only diff." available /><RoadmapItem number="04" title="Autonomous execution" detail="Isolated validation with explicit human approval." /><RoadmapItem number="05" title="Team handoffs" detail="Share context and decisions across your team." /></div>
+          <p className="unavailable-note">Autonomous execution and team handoffs are not available in this build.</p>
         </section>
 
         <footer className="footer"><div className="footer-brand"><BrandMark /><span>devrelayai</span></div><span>Built for thoughtful engineering handoffs.</span><span className="footer-version">LOCAL WORKSPACE · 0.1.0</span></footer>
@@ -234,6 +255,20 @@ function PlanResult({ plan }: { plan: TaskPlan }) {
   </div>;
 }
 
-function RoadmapItem({ number, title, detail }: { number: string; title: string; detail: string }) {
-  return <div className="roadmap-item"><span>{number}</span><div><strong>{title}</strong><p>{detail}</p></div><Badge tone="muted">Unavailable</Badge></div>;
+function RoadmapItem({ number, title, detail, available = false }: { number: string; title: string; detail: string; available?: boolean }) {
+  return <div className="roadmap-item"><span>{number}</span><div><strong>{title}</strong><p>{detail}</p></div><Badge tone={available ? "good" : "muted"}>{available ? "Available" : "Unavailable"}</Badge></div>;
+}
+
+function ProposalResult({ proposal }: { proposal: CodeChangeProposal }) {
+  return <section className="proposal-result" aria-labelledby="proposal-title" aria-live="polite">
+    <div className="proposal-heading"><div><p className="eyebrow">REVIEW ONLY · {proposal.lifecycle_state.replaceAll("_", " ")}</p><h4 id="proposal-title">Code change proposal</h4></div><Badge tone="good">Static checks passed</Badge></div>
+    <p className="proposal-task"><strong>Task:</strong> {proposal.task_description}</p>
+    <p className="proposal-summary">{proposal.proposed_change_summary}</p>
+    <div className="proposal-meta"><span>Provider: mock</span><span>Risk: {proposal.risk_classification}</span><span>Human approval required</span></div>
+    {proposal.target_files.map((file) => <div className="proposal-target" key={file.path}><strong>Target</strong><code>{file.path}:{file.source_reference.line}</code><small>Source SHA-256: <code>{file.original_sha256}</code></small></div>)}
+    <div className="proposal-findings"><h5>Static validation findings</h5><ul>{proposal.validation_findings.map((finding) => <li key={finding.check}><Badge tone={finding.status === "passed" ? "good" : "muted"}>{finding.status}</Badge><span>{finding.detail}</span></li>)}</ul></div>
+    <h5>Unified diff</h5><pre className="proposal-diff"><code>{proposal.unified_diff}</code></pre>
+    <div className="runtime-not-run"><strong>Runtime validation: not run</strong><p>{proposal.runtime_validation_reason}</p></div>
+    <p className="proposal-safety">Mock-generated proposal. No files were changed, approved, applied, or executed.</p>
+  </section>;
 }
