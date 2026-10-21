@@ -63,12 +63,44 @@ The response includes status, relevant files, traceable source references, propo
 
 The offline evaluation scenarios use `tests/fixtures/planning_repo`: a division-by-zero defect (`package/calculator.py`), API input validation (`package/api.py`), and investigation of a function and its imported dependency (`package/service.py`, `package/dependencies.py`). Each scenario has corresponding tests under `tests/`. The mock handles these predefined cases only; evaluation checks structured output, expected paths/tests, and source-reference validity, not AI reasoning quality.
 
+## Frontend dashboard (local development)
+
+The Next.js dashboard is in `frontend/`. It uses a server-side proxy for only `/health`, repository analysis, and task planning. Configure the backend with the synthetic repository and mock provider from the repository root:
+
+```powershell
+$env:INFERENCE_PROVIDER = "mock"
+$env:AUTHORIZED_REPOSITORIES = '{"planning-fixture":"C:/devrelay-ai/tests/fixtures/planning_repo"}'
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+```
+
+In a second PowerShell terminal:
+
+```powershell
+Set-Location C:\devrelay-ai\frontend
+if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`. `NEXT_PUBLIC_REPOSITORY_IDS` contains only configured IDs (comma-separated), never filesystem paths. The backend's `AUTHORIZED_REPOSITORIES` remains the authorization boundary. `BACKEND_API_URL` is server-side only and must point to a local loopback backend; no model credentials are read by the frontend. The frontend scripts select Next.js Webpack mode because Turbopack's CSS worker exited before connecting on this Windows development host.
+
+Restart FastAPI after changing its environment. Restart the Next.js development server after changing `frontend/.env.local`, especially the public repository IDs. Use `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` in `frontend/`. The dashboard is local-development only: no authentication, no repository discovery endpoint, no code changes or execution, and no production deployment configuration are included.
+
 The example environment selects `INFERENCE_PROVIDER=mock` so local development does not need billing access. Set `INFERENCE_PROVIDER=mock` to explicitly select deterministic, offline test responses. Responses identify themselves with `provider="mock"`, `is_mock=true`, and a `devrelay-mock-v1` model name. Mock is never selected automatically after a Nebius error. Phase 2 has no public inference route; the provider is available through the application inference service for local wiring and tests.
 
 ## Tests
 
 ```powershell
 python -m pytest
+```
+
+Frontend checks (from `frontend/`):
+
+```powershell
+npm test
+npm run lint
+npm run typecheck
+npm run build
 ```
 
 ## Genuine inference smoke test

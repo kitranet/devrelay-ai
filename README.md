@@ -17,6 +17,10 @@ The health check is available at `http://127.0.0.1:8000/health`. Repository anal
 
 For offline planning, set `INFERENCE_PROVIDER=mock`. The deterministic mock supports only named synthetic evaluation scenarios; unsupported requests return an explicit unsupported result. It does not represent NVIDIA Nemotron output.
 
+## Local dashboard
+
+The Next.js dashboard lives in `frontend/`. Configure the synthetic repository in the backend and start FastAPI on port 8001, then copy `frontend/.env.example` to `frontend/.env.local`, install with `npm ci`, and run `npm run dev` from that directory. The dashboard opens at `http://localhost:3000`. Full setup and test commands are in [docs/setup.md](docs/setup.md).
+
 ## Project docs
 
 - [Architecture](docs/architecture.md)

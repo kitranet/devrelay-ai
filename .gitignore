@@ -232,3 +232,7 @@ __marimo__/
 *.key
 dist/
 node_modules/
+.next/
+*.tsbuildinfo
+coverage/
+frontend/next-env.d.ts
