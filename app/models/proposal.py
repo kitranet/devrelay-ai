@@ -42,6 +42,7 @@ class CodeChangeProposal(BaseModel):
     target_files: list[ProposalTargetFile] = Field(min_length=1, max_length=5)
     proposed_change_summary: str = Field(min_length=1, max_length=1_000)
     unified_diff: str = Field(min_length=1, max_length=16_384)
+    diff_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     risk_classification: Literal["low", "medium", "high"]
     validation_findings: list[ProposalValidationFinding] = Field(max_length=20)
     static_validation_status: Literal["passed", "failed"]
@@ -50,9 +51,8 @@ class CodeChangeProposal(BaseModel):
     provider: Literal["mock"] = "mock"
     is_mock: Literal[True] = True
     created_at: datetime
+    version: int = Field(default=1, ge=1)
     lifecycle_state: Literal[
-        "proposed", "validated", "awaiting_review", "approved", "applied", "rejected"
+        "proposed", "validated", "awaiting_review", "review_approved", "changes_requested", "rejected"
     ]
     human_approval_required: Literal[True] = True
-
-

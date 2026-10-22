@@ -317,6 +317,7 @@ class ProposalGenerationService:
             )],
             proposed_change_summary="Raise ValueError with a clear message when divide receives a zero denominator.",
             unified_diff=diff,
+            diff_sha256=hashlib.sha256(diff.encode("utf-8")).hexdigest(),
             risk_classification="low",
             validation_findings=[
                 ProposalValidationFinding(check="authorized_scope", status="passed", detail="Only the predefined authorized calculator source is targeted."),
@@ -344,3 +345,14 @@ class ProposalGenerationService:
         if proposal is None:
             raise ProposalNotFoundError()
         return proposal
+
+
+def verify_current_source_revision(settings: Settings, proposal: CodeChangeProposal) -> None:
+    """Fail closed if a proposal's authorized target has changed since generation."""
+    for target in proposal.target_files:
+        try:
+            _, source = _read_authorized_source(settings, proposal.repository_id, target.path)
+        except (ProposalValidationError, RepositoryNotAuthorizedError, ProposalSourceConflictError):
+            raise ProposalSourceConflictError() from None
+        if hashlib.sha256(source).hexdigest() != target.original_sha256:
+            raise ProposalSourceConflictError()

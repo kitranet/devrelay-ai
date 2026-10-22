@@ -217,6 +217,50 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .runtime-not-run strong { color: #85601f; font-size: 9px; }
 .runtime-not-run p { margin: 5px 0 0; color: #887955; font-size: 9px; line-height: 1.5; }
 .proposal-safety { margin: 10px 0 0; color: #87938a; font-size: 8px; }
+.review-panel, .handoff-section { margin-top: 14px; border: 1px solid #e1e8e1; border-radius: 8px; padding: 13px; background: #fff; }
+.handoff-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.handoff-title-row .eyebrow { margin-bottom: 4px; }
+.handoff-title-row h4 { margin: 0; color: #2b4337; font-size: 13px; }
+.identity-warning { margin-top: 11px; border: 1px solid #efdfbe; border-radius: 6px; padding: 9px; color: #80663c; background: #fffbf2; font-size: 9px; line-height: 1.5; }
+.identity-warning strong { color: #795614; }
+.review-disabled { margin: 10px 0 0; color: #88948c; font-size: 9px; }
+.review-disabled code { color: #5c725f; }
+.review-form { display: grid; gap: 7px; margin-top: 12px; }
+.review-form label { color: #43574b; font-size: 9px; font-weight: 700; }
+.review-form label span { color: #8b9890; font-size: 8px; font-weight: 400; }
+.review-form input, .review-form textarea { width: 100%; border: 1px solid #dfe7df; border-radius: 6px; padding: 8px 9px; color: #405349; background: #fcfdfa; font: inherit; font-size: 10px; }
+.review-form textarea { min-height: 62px; resize: vertical; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 3px 0; }
+.review-actions .button { min-height: 33px; font-size: 9px; }
+.button-reject { border-color: #ead8d2; color: #814d40; background: #fff8f5; }
+.review-form > small { color: #929d95; font-size: 8px; }
+.review-form .reviewer-input-error { color: #a34838; }
+.review-form input[aria-invalid="true"] { border-color: #c66a57; }
+.review-history { margin-top: 13px; border-top: 1px solid #edf0ec; padding-top: 11px; }
+.review-history h5, .handoff-result h5 { margin: 0 0 7px; color: #46594d; font-size: 10px; }
+.review-history article { margin-top: 7px; border: 1px solid #e8ede7; border-radius: 6px; padding: 9px; background: #fafcf9; }
+.review-history article.audit-rejection { border-color: #efd8ce; background: #fff8f4; }
+.review-history article strong, .review-history article small { display: block; }
+.review-history article strong { color: #53665a; font-size: 9px; text-transform: capitalize; }
+.review-history article small { margin-top: 4px; color: #89968d; font-size: 8px; }
+.review-history article p, .review-history article li, .review-history > p { margin: 6px 0 0; color: #718078; font-size: 9px; line-height: 1.5; }
+.review-history article ul { margin: 5px 0 0; padding-left: 16px; }
+.handoff-decision { margin: 7px 0; border: 1px solid #e8ede7; border-radius: 6px; padding: 9px; background: #fafcf9; }
+.handoff-decision strong, .handoff-decision small { display: block; }
+.handoff-decision strong { color: #53665a; text-transform: capitalize; }
+.handoff-decision small { margin-top: 4px; color: #89968d; font-size: 8px; }
+.handoff-decision p { margin: 6px 0 0; }
+.handoff-section { background: #fbfdfa; }
+.handoff-title-row .button { flex: 0 0 auto; }
+.handoff-result { margin-top: 12px; border-top: 1px solid #e9eee8; padding-top: 11px; color: #6d7c72; font-size: 9px; line-height: 1.55; }
+.handoff-report-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.handoff-report-toolbar > div { display: flex; gap: 6px; }
+.handoff-report-toolbar .button { min-height: 30px; font-size: 8px; }
+.handoff-result h5 { margin-top: 12px; }
+.handoff-result p { margin: 5px 0; }
+.handoff-result ul { margin: 5px 0; padding-left: 17px; }
+.markdown-status { color: #39704e; font-size: 8px; }
+.provenance-note { border-top: 1px solid #e9eee8; padding-top: 8px; color: #829087; font-size: 8px; }
 
 .roadmap-panel { margin-top: 24px; border: 1px solid #e2e8e1; border-radius: 10px; padding: 18px 20px 14px; background: #fafbf8; }
 .roadmap-heading { display: flex; align-items: center; justify-content: space-between; }
@@ -273,6 +317,10 @@ h1, h2, h3, h4, p { margin-top: 0; }
   .panel-action-row .button { align-self: stretch; }
   .proposal-action { align-items: stretch; flex-direction: column; }
   .proposal-action .button { width: 100%; }
+  .review-actions { display: grid; }
+  .review-actions .button { width: 100%; }
+  .handoff-title-row { align-items: flex-start; flex-direction: column; }
+  .handoff-report-toolbar { align-items: flex-start; flex-direction: column; }
   .metrics-grid { grid-template-columns: repeat(2, 1fr); }
   .result-meta { gap: 7px; }
   .roadmap-panel { padding: 15px 13px 12px; }

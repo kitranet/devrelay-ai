@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     nebius_api_key: SecretStr | None = None
     nebius_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
     inference_provider: str = "nebius"
+    enable_local_reviews: bool = False
     authorized_repositories: dict[str, Path] = Field(default_factory=dict)
     repository_max_files: int = Field(default=2_000, gt=0, le=20_000)
     repository_max_file_size_bytes: int = Field(default=1_000_000, gt=0, le=20_000_000)
@@ -80,6 +81,12 @@ class Settings(BaseSettings):
             if not path.is_absolute():
                 raise ValueError("Authorized repository roots must be absolute paths")
         return value
+
+    @model_validator(mode="after")
+    def restrict_local_reviews_to_development(self) -> "Settings":
+        if self.enable_local_reviews and self.environment.strip().lower() != "development":
+            raise ValueError("ENABLE_LOCAL_REVIEWS can only be enabled in development.")
+        return self
 
 
 @lru_cache

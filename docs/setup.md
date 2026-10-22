@@ -30,6 +30,8 @@ Set values in the local, git-ignored `.env` file or the process environment. `NE
 | `NEBIUS_TIMEOUT_SECONDS` | `30` | Per-request timeout; range 0–600 (exclusive of 0) |
 | `LOG_LEVEL` | `INFO` | Standard Python logging level |
 | `INFERENCE_PROVIDER` | `nebius` | Select `nebius` or deterministic offline `mock` provider |
+| `ENABLE_LOCAL_REVIEWS` | `false` | Enables unverified local review only when `ENVIRONMENT=development`; keep disabled for production |
+| `ENVIRONMENT` | `development` | Application environment; local reviews cannot be enabled outside development |
 | `AUTHORIZED_REPOSITORIES` | `{}` | JSON mapping of repository IDs to absolute local roots |
 | `REPOSITORY_MAX_FILES` | `2000` | Maximum regular files considered |
 | `REPOSITORY_MAX_FILE_SIZE_BYTES` | `1000000` | Maximum individual file size |
@@ -89,7 +91,7 @@ The static checks reject stale source, traversal, absolute paths, duplicate targ
 
 ## Frontend dashboard (local development)
 
-The Next.js dashboard is in `frontend/`. It uses a server-side proxy for only `/health`, repository analysis, task planning, and proposal creation. Configure the backend with the synthetic repository and mock provider from the repository root:
+The Next.js dashboard is in `frontend/`. It uses a server-side proxy allowlist for `/health`, repository analysis, task planning, proposal creation, review status/history/submission, and handoff report generation/retrieval. Configure the backend with the synthetic repository and mock provider from the repository root:
 
 ```powershell
 $env:INFERENCE_PROVIDER = "mock"
@@ -106,11 +108,66 @@ npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`. `NEXT_PUBLIC_REPOSITORY_IDS` contains only configured IDs (comma-separated), never filesystem paths. The backend's `AUTHORIZED_REPOSITORIES` remains the authorization boundary. `BACKEND_API_URL` is server-side only and must point to a local loopback backend; no model credentials are read by the frontend. The frontend scripts select Next.js Webpack mode because Turbopack's CSS worker exited before connecting on this Windows development host.
+Open `http://localhost:3000`. `NEXT_PUBLIC_REPOSITORY_IDS` contains only configured IDs (comma-separated), never filesystem paths. `NEXT_PUBLIC_LOCAL_REVIEWER_ID` is an unverified display label only; use a pseudonym. The backend's `AUTHORIZED_REPOSITORIES` remains the authorization boundary. `BACKEND_API_URL` is server-side only and must point to a local loopback backend; no model credentials are read by the frontend. The frontend scripts select Next.js Webpack mode because Turbopack's CSS worker exited before connecting on this Windows development host.
 
 Restart FastAPI after changing its environment. Restart the Next.js development server after changing `frontend/.env.local`, especially the public repository IDs. Use `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` in `frontend/`. The dashboard is local-development only: no authentication, no repository discovery endpoint, no code changes or execution, and no production deployment configuration are included.
 
 The example environment selects `INFERENCE_PROVIDER=mock` so local development does not need billing access. Set `INFERENCE_PROVIDER=mock` to explicitly select deterministic, offline test responses. Responses identify themselves with `provider="mock"`, `is_mock=true`, and a `devrelay-mock-v1` model name. Mock is never selected automatically after a Nebius error. Phase 2 has no public inference route; the provider is available through the application inference service for local wiring and tests.
+
+## Local review and engineering handoff (Phase 5A)
+
+Review decisions are disabled by default. The backend refuses `ENABLE_LOCAL_REVIEWS=true` unless `ENVIRONMENT=development`, and review/history routes require direct loopback client and host addresses. Keep FastAPI bound to `127.0.0.1`; do not publish or reverse-proxy these endpoints. Reviewer identifiers are unverified local labels, not authenticated identities. Use a pseudonymous label and keep credentials, private keys, secrets, and unnecessary personal data out of justifications and questions. Credential-like patterns are rejected. Approval accepts a proposal for further consideration only. It never applies or executes code.
+
+For a local demo, first configure and start the synthetic mock backend as shown above. In that backend PowerShell process, set the flag before starting FastAPI:
+
+```powershell
+$env:ENVIRONMENT = "development"
+$env:INFERENCE_PROVIDER = "mock"
+$env:ENABLE_LOCAL_REVIEWS = "true"
+$env:AUTHORIZED_REPOSITORIES = '{"planning-fixture":"C:/devrelay-ai/tests/fixtures/planning_repo"}'
+Set-Location C:\devrelay-ai
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+Restart FastAPI after changing the flag. The dashboard can then create a mock plan and proposal, show the local reviewer warning, and enable approve/request-changes/reject controls. Every decision requires a non-empty justification and is bound to the proposal version, source hash and diff hash. Repeating a decision or submitting stale hashes returns a conflict. No approval button is shown as active when `/api/v1/reviews/status` reports disabled.
+
+The API routes are:
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/reviews/status` | Read local review flag and unverified identity status |
+| `POST` | `/api/v1/reviews` | Submit one justified local decision |
+| `GET` | `/api/v1/reviews/{proposal_id}` | Retrieve bounded review and audit history |
+| `POST` | `/api/v1/handoffs` | Generate a structured report for a known proposal |
+| `GET` | `/api/v1/handoffs/{report_id}` | Retrieve a generated report |
+
+Example decision body (substitute the proposal ID, version, and hashes from the proposal response):
+
+```json
+{
+  "proposal_id": "00000000-0000-0000-0000-000000000000",
+  "decision": "approve",
+  "reviewer_identifier": "local-reviewer",
+  "justification": "The static diff matches the stated zero-denominator behavior.",
+  "proposal_version": 1,
+  "source_sha256": "<64-character source hash>",
+  "diff_sha256": "<64-character diff hash>",
+  "outstanding_questions": ["Run the calculator tests in an isolated environment."]
+}
+```
+
+The handoff report is generated from current static analysis, the stored plan/proposal, and recorded review history without calling a model. It marks task and proposal text as mock output, reviewer identity as unverified, static analysis as evidence, and runtime validation as `not_run`. It includes source references, hashes, risks, assumptions, missing evidence, outstanding questions and next engineer actions. The dashboard can copy or download the report as Markdown.
+
+Generate and retrieve a report from PowerShell using a proposal ID returned by the proposal endpoint:
+
+```powershell
+$handoff = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/api/v1/handoffs `
+  -ContentType 'application/json' `
+  -Body '{"proposal_id":"<proposal UUID>"}'
+Invoke-RestMethod -Uri "http://127.0.0.1:8001/api/v1/handoffs/$($handoff.report_id)"
+```
+
+Review, audit, and report records are bounded in-memory prototype data. They disappear when FastAPI restarts or an older record is evicted; the audit history is not tamper-proof. Production use requires authenticated identity, role checks, durable audit storage, retention controls, and an independently reviewed execution system. None are part of this phase.
 
 ## Tests
 

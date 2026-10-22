@@ -5,6 +5,9 @@ const ROUTES = new Map<string, { method: "GET" | "POST"; upstream: string }>([
   ["api/v1/repositories/analyze", { method: "POST", upstream: "/api/v1/repositories/analyze" }],
   ["api/v1/tasks/plan", { method: "POST", upstream: "/api/v1/tasks/plan" }],
   ["api/v1/proposals/create", { method: "POST", upstream: "/api/v1/proposals/create" }],
+  ["api/v1/reviews/status", { method: "GET", upstream: "/api/v1/reviews/status" }],
+  ["api/v1/reviews", { method: "POST", upstream: "/api/v1/reviews" }],
+  ["api/v1/handoffs", { method: "POST", upstream: "/api/v1/handoffs" }],
 ]);
 
 type RouteContext = { params: Promise<{ path: string[] }> };
@@ -15,7 +18,13 @@ function errorResponse(status: number, code: string, message: string) {
 
 async function proxy(request: NextRequest, context: RouteContext) {
   const { path } = await context.params;
-  const route = ROUTES.get(path.join("/"));
+  const pathKey = path.join("/");
+  const route = ROUTES.get(pathKey) ?? (
+    request.method === "GET" && path.length === 4 && path[0] === "api" && path[1] === "v1" &&
+    ["reviews", "handoffs"].includes(path[2]) && /^[0-9a-f-]{36}$/i.test(path[3])
+      ? { method: "GET" as const, upstream: `/${pathKey}` }
+      : undefined
+  );
   if (!route) return errorResponse(404, "proxy_route_not_found", "This backend route is not available through the dashboard.");
   if (request.method !== route.method) return errorResponse(405, "method_not_allowed", "This method is not available for this route.");
 

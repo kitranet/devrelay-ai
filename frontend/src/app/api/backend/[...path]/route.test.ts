@@ -55,4 +55,31 @@ describe("local backend proxy", () => {
     expect(unavailable.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("proxies local review status, history, and handoff routes with strict UUID paths", async () => {
+    // fetch consumes a Response body once; each upstream call needs its own response.
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{"enabled":false}', {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.BACKEND_API_URL = "http://127.0.0.1:8001";
+    const status = await GET(new NextRequest("http://localhost/api/backend/api/v1/reviews/status"), {
+      params: Promise.resolve({ path: ["api", "v1", "reviews", "status"] }),
+    });
+    expect(status.status).toBe(200);
+    const history = await GET(new NextRequest("http://localhost/api/backend/api/v1/reviews/2b7a47fb-5c38-481a-a35c-b4f4cc0d7047"), {
+      params: Promise.resolve({ path: ["api", "v1", "reviews", "2b7a47fb-5c38-481a-a35c-b4f4cc0d7047"] }),
+    });
+    expect(history.status).toBe(200);
+    const handoffId = "01e6d118-3477-45df-9a1a-0cfaf17d4ae8";
+    const handoff = await GET(new NextRequest(`http://localhost/api/backend/api/v1/handoffs/${handoffId}`), {
+      params: Promise.resolve({ path: ["api", "v1", "handoffs", handoffId] }),
+    });
+    expect(handoff.status).toBe(200);
+    const malformed = await GET(new NextRequest("http://localhost/api/backend/api/v1/handoffs/not-a-uuid"), {
+      params: Promise.resolve({ path: ["api", "v1", "handoffs", "not-a-uuid"] }),
+    });
+    expect(malformed.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

@@ -109,6 +109,54 @@ class ProposalValidationError(ApplicationError):
     code = "proposal_validation_failed"
 
 
+class LocalReviewDisabledError(ApplicationError):
+    status_code = 404
+    code = "local_reviews_disabled"
+
+    def __init__(self) -> None:
+        super().__init__("Local review is disabled. Enable it only for loopback development use.")
+
+
+class LocalReviewLoopbackError(ApplicationError):
+    status_code = 403
+    code = "local_review_loopback_only"
+
+    def __init__(self) -> None:
+        super().__init__("Local review and handoff routes accept loopback requests only.")
+
+
+class ProposalVersionConflictError(ApplicationError):
+    status_code = 409
+    code = "proposal_version_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("The proposal version or reviewed hashes are stale. Refresh the proposal before reviewing.")
+
+
+class ReviewTransitionConflictError(ApplicationError):
+    status_code = 409
+    code = "review_transition_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("This proposal has already received a review decision and cannot be reviewed again.")
+
+
+class HandoffReportNotFoundError(ApplicationError):
+    status_code = 404
+    code = "handoff_report_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("The handoff report is not available in this application session.")
+
+
+class ReviewPayloadTooLargeError(ApplicationError):
+    status_code = 413
+    code = "review_payload_too_large"
+
+    def __init__(self) -> None:
+        super().__init__("The review request exceeds the local size limit.")
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     @application.exception_handler(ApplicationError)
     async def application_error_handler(_: Request, exc: ApplicationError) -> JSONResponse:

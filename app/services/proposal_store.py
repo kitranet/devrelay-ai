@@ -8,7 +8,10 @@ from threading import RLock
 from uuid import UUID
 
 from app.models.proposal import CodeChangeProposal
+from app.models.handoff import HandoffReport
+from app.models.review import AuditEvent, ReviewRecord
 from app.models.task import TaskPlan
+from app.core.errors import ProposalNotFoundError, ProposalVersionConflictError, ReviewTransitionConflictError
 
 
 @dataclass(frozen=True)
@@ -64,3 +67,79 @@ class InMemoryProposalStore:
         with self._lock:
             proposal = self._records.get(proposal_id)
             return proposal.model_copy(deep=True) if proposal else None
+
+
+class InMemoryReviewStore:
+    """Bounded process-local review and non-durable audit records."""
+
+    def __init__(self, max_reviews: int = 512, max_events: int = 1_024) -> None:
+        self._max_reviews = max_reviews
+        self._max_events = max_events
+        self._reviews: OrderedDict[UUID, ReviewRecord] = OrderedDict()
+        self._events: OrderedDict[UUID, AuditEvent] = OrderedDict()
+        self._lock = RLock()
+
+    def decide(
+        self,
+        proposal_store: InMemoryProposalStore,
+        proposal_id: UUID,
+        expected_version: int,
+        review: ReviewRecord,
+        event: AuditEvent,
+    ) -> CodeChangeProposal:
+        with self._lock:
+            proposal = proposal_store.get(proposal_id)
+            if proposal is None:
+                raise ProposalNotFoundError()
+            if proposal.version != expected_version:
+                raise ProposalVersionConflictError()
+            if proposal.lifecycle_state != "awaiting_review":
+                raise ReviewTransitionConflictError()
+            updated = proposal.model_copy(update={
+                "lifecycle_state": review.proposal_lifecycle_state,
+                "version": proposal.version + 1,
+            })
+            proposal_store.put(updated)
+            self._reviews[review.review_id] = review.model_copy(deep=True)
+            self._events[event.event_id] = event.model_copy(deep=True)
+            while len(self._reviews) > self._max_reviews:
+                self._reviews.popitem(last=False)
+            while len(self._events) > self._max_events:
+                self._events.popitem(last=False)
+            return updated.model_copy(deep=True)
+
+    def history(self, proposal_id: UUID) -> list[ReviewRecord]:
+        with self._lock:
+            return [record.model_copy(deep=True) for record in self._reviews.values() if record.proposal_id == proposal_id]
+
+    def record_event(self, event: AuditEvent) -> None:
+        with self._lock:
+            self._events[event.event_id] = event.model_copy(deep=True)
+            self._events.move_to_end(event.event_id)
+            while len(self._events) > self._max_events:
+                self._events.popitem(last=False)
+
+    def audit_events(self, proposal_id: UUID) -> list[AuditEvent]:
+        with self._lock:
+            return [event.model_copy(deep=True) for event in self._events.values() if event.proposal_id == proposal_id]
+
+
+class InMemoryHandoffStore:
+    """Bounded, process-local handoff artifact storage."""
+
+    def __init__(self, max_records: int = 128) -> None:
+        self._max_records = max_records
+        self._records: OrderedDict[UUID, HandoffReport] = OrderedDict()
+        self._lock = RLock()
+
+    def put(self, report: HandoffReport) -> None:
+        with self._lock:
+            self._records[report.report_id] = report.model_copy(deep=True)
+            self._records.move_to_end(report.report_id)
+            while len(self._records) > self._max_records:
+                self._records.popitem(last=False)
+
+    def get(self, report_id: UUID) -> HandoffReport | None:
+        with self._lock:
+            report = self._records.get(report_id)
+            return report.model_copy(deep=True) if report else None

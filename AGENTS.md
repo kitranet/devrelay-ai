@@ -13,6 +13,9 @@
 - Planning must remain read-only and static; do not execute or modify analyzed repository code.
 - Proposal generation is limited to the predefined synthetic calculator scenario. It must create a diff in memory, validate source hashes and static patch safety, and never write, apply, or execute proposed code.
 - Keep proposal lifecycle at `awaiting_review` with `human_approval_required=true`; do not add apply/approve behavior without an explicit later scope.
+- Local Phase 5A reviews are disabled by default, development-only, loopback-only, and use unverified reviewer labels. Review approval means further consideration only; it never applies, executes, merges, or deploys code.
+- Bind review decisions to proposal version, source hash, diff hash, and a non-empty justification. Preserve single-decision transitions and bounded in-memory audit history; do not call it durable or immutable.
+- Generate handoff reports from stored plans/proposals/reviews and current static analysis only. Mark mock output, unverified identity, assumptions, missing evidence, and runtime `not_run` accurately.
 - Report runtime validation as `not_run` until a trusted isolated executor exists. Never imply host execution or successful tests from static parsing.
 - Run `python -m pytest` before proposing backend changes.
 - Preserve the repository license and existing files unless a task explicitly requests changes.

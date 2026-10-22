@@ -17,6 +17,8 @@ The health check is available at `http://127.0.0.1:8000/health`. Repository anal
 
 Phase 4B adds `POST /api/v1/proposals/create` for the predefined division-by-zero calculator task and `GET /api/v1/proposals/{proposal_id}` to retrieve a review-only proposal. Static checks use unified-diff validation and Python AST parsing. Runtime validation reports `not_run` because no trusted sandbox is configured. No proposal endpoint applies code.
 
+Phase 5A adds a disabled-by-default local review workflow and evidence-based handoff reports. Set `ENABLE_LOCAL_REVIEWS=true` only in development to enable loopback review requests. Reviewer labels are unverified, and an approval only accepts a proposal for further consideration; it does not apply code. Review and report storage is process-local and non-durable. See [docs/setup.md](docs/setup.md) for safe local demonstration steps.
+
 For offline planning, set `INFERENCE_PROVIDER=mock`. The deterministic mock supports only named synthetic evaluation scenarios; unsupported requests return an explicit unsupported result. It does not represent NVIDIA Nemotron output.
 
 ## Local dashboard

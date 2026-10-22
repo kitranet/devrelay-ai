@@ -1,10 +1,25 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { analyzeRepository, checkBackend, createProposal, planTask } from "@/lib/api";
-import type { CodeChangeProposal, RepositoryAnalysis, TaskPlan } from "@/lib/types";
+import { analyzeRepository, checkBackend, createProposal, generateHandoff, getLocalReviewStatus, getReviewHistory, planTask, submitReview } from "@/lib/api";
+import { handoffToMarkdown } from "@/lib/handoff-markdown";
+import type { CodeChangeProposal, HandoffReport, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, TaskPlan } from "@/lib/types";
 
 type BackendState = "checking" | "connected" | "offline";
+const reviewerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const credentialLikeReviewerIdentifier = /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+|nvapi-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})/i;
+
+function reviewerIdentifierError(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) return "Enter a reviewer label.";
+  if (!reviewerIdentifierPattern.test(normalized)) {
+    return "Use 1–64 characters: start with a letter or number, then use only letters, numbers, periods, underscores, or hyphens. Spaces are not allowed.";
+  }
+  if (credentialLikeReviewerIdentifier.test(normalized)) {
+    return "Reviewer labels cannot contain credential-like values.";
+  }
+  return null;
+}
 
 const configuredRepositories = (process.env.NEXT_PUBLIC_REPOSITORY_IDS ?? "")
   .split(",")
@@ -34,10 +49,19 @@ export default function Dashboard() {
   const [analysis, setAnalysis] = useState<RepositoryAnalysis | null>(null);
   const [plan, setPlan] = useState<TaskPlan | null>(null);
   const [proposal, setProposal] = useState<CodeChangeProposal | null>(null);
+  const [reviewStatus, setReviewStatus] = useState<LocalReviewStatus | null>(null);
+  const [reviewHistory, setReviewHistory] = useState<ReviewHistory | null>(null);
+  const [handoff, setHandoff] = useState<HandoffReport | null>(null);
+  const [reviewerIdentifier, setReviewerIdentifier] = useState(process.env.NEXT_PUBLIC_LOCAL_REVIEWER_ID ?? "local-reviewer");
+  const [reviewJustification, setReviewJustification] = useState("");
+  const [outstandingQuestions, setOutstandingQuestions] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [proposalBusy, setProposalBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [markdownStatus, setMarkdownStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -53,6 +77,21 @@ export default function Dashboard() {
     });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    getLocalReviewStatus().then(setReviewStatus).catch(() => setReviewStatus(null));
+  }, []);
+
+  useEffect(() => {
+    if (!proposal || !reviewStatus?.enabled) return;
+    let active = true;
+    getReviewHistory(proposal.proposal_id).then((result) => {
+      if (active) setReviewHistory(result);
+    }).catch(() => {
+      if (active) setReviewHistory(null);
+    });
+    return () => { active = false; };
+  }, [proposal, reviewStatus?.enabled]);
 
   const providerLabel = useMemo(() => {
     if (!plan) return "Reported with first plan";
@@ -84,7 +123,9 @@ export default function Dashboard() {
     try {
       const nextPlan = await planTask(repositoryId, taskDescription.trim());
       setPlan(nextPlan);
-      if (nextPlan.status === "planned") setProposal(null);
+      setProposal(null);
+      setReviewHistory(null);
+      setHandoff(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Task planning failed.");
     } finally {
@@ -97,7 +138,10 @@ export default function Dashboard() {
     setProposalBusy(true);
     setError(null);
     try {
-      setProposal(await createProposal(repositoryId, plan.task_id));
+      const nextProposal = await createProposal(repositoryId, plan.task_id);
+      setProposal(nextProposal);
+      setReviewHistory(null);
+      setHandoff(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Proposal generation failed.");
     } finally {
@@ -105,11 +149,88 @@ export default function Dashboard() {
     }
   }
 
+  async function recordReview(decision: ReviewDecision) {
+    if (!proposal || !reviewStatus?.enabled || !reviewJustification.trim()) return;
+    const identifierError = reviewerIdentifierError(reviewerIdentifier);
+    if (identifierError) {
+      setError(identifierError);
+      return;
+    }
+    setReviewBusy(true);
+    setError(null);
+    try {
+      const review = await submitReview({
+        proposal_id: proposal.proposal_id,
+        decision,
+        reviewer_identifier: reviewerIdentifier.trim(),
+        justification: reviewJustification,
+        proposal_version: proposal.version,
+        source_sha256: proposal.target_files[0].original_sha256,
+        diff_sha256: proposal.diff_sha256,
+        outstanding_questions: outstandingQuestions.split("\n").map((value) => value.trim()).filter(Boolean).slice(0, 12),
+      });
+      setProposal({ ...proposal, lifecycle_state: review.proposal_lifecycle_state, version: proposal.version + 1 });
+      setReviewJustification("");
+      setOutstandingQuestions("");
+      setHandoff(null);
+    } catch (reason) {
+      try {
+        setReviewHistory(await getReviewHistory(proposal.proposal_id));
+      } catch {
+        // A failed audit-history refresh must not replace the original decision error.
+      }
+      const message = reason instanceof Error ? reason.message : "Review decision could not be recorded.";
+      setError(message.startsWith("Review request validation failed")
+        ? "The review was not recorded. Check the reviewer label format and required review fields; no decision was saved."
+        : message);
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function buildHandoff() {
+    if (!proposal) return;
+    setHandoffBusy(true);
+    setError(null);
+    try {
+      const report = await generateHandoff(proposal.proposal_id);
+      setHandoff(report);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Handoff report generation failed.");
+    } finally {
+      setHandoffBusy(false);
+    }
+  }
+
+  async function copyHandoffMarkdown() {
+    if (!handoff) return;
+    try {
+      await navigator.clipboard.writeText(handoffToMarkdown(handoff));
+      setMarkdownStatus("Markdown copied.");
+    } catch {
+      setMarkdownStatus("Clipboard access is unavailable; use Download Markdown instead.");
+    }
+  }
+
+  function downloadHandoffMarkdown() {
+    if (!handoff) return;
+    const file = new Blob([handoffToMarkdown(handoff)], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `devrelay-handoff-${handoff.report_id}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setMarkdownStatus("Markdown download prepared.");
+  }
+
   function onRepositoryChange(value: string) {
     setRepositoryId(value);
     setAnalysis(null);
     setPlan(null);
     setProposal(null);
+    setReviewHistory(null);
+    setHandoff(null);
     setError(null);
   }
 
@@ -138,7 +259,7 @@ export default function Dashboard() {
       <main id="overview" className="main-content">
         <section className="welcome-row" aria-labelledby="page-title">
           <div>
-            <p className="eyebrow">ENGINEERING HANDOFF WORKSPACE <span>·</span> PHASE 4B</p>
+            <p className="eyebrow">ENGINEERING HANDOFF WORKSPACE <span>·</span> PHASE 5A</p>
             <h1 id="page-title">Good work starts with <em>context.</em></h1>
             <p className="welcome-copy">Understand a repository. Shape a plan. Keep every next step grounded in evidence.</p>
           </div>
@@ -220,6 +341,8 @@ export default function Dashboard() {
             {plan && <PlanResult plan={plan} />}
             {plan?.status === "planned" && plan.is_mock && /division by zero/i.test(plan.task_description) && !proposal && <div className="proposal-action"><p>This fixed mock scenario can produce a review-only patch. The source file will remain unchanged.</p><button className="button button-primary" type="button" onClick={generateProposal} disabled={proposalBusy || backend !== "connected"}>{proposalBusy ? <><span className="spinner" /> Preparing proposal</> : <>Generate code proposal <span aria-hidden="true">→</span></>}</button></div>}
             {proposal && <ProposalResult proposal={proposal} />}
+            {proposal && <ReviewPanel proposal={proposal} status={reviewStatus} history={reviewHistory} reviewerIdentifier={reviewerIdentifier} setReviewerIdentifier={setReviewerIdentifier} justification={reviewJustification} setJustification={setReviewJustification} outstandingQuestions={outstandingQuestions} setOutstandingQuestions={setOutstandingQuestions} busy={reviewBusy} onDecision={recordReview} />}
+            {proposal && <section className="handoff-section" aria-labelledby="handoff-heading"><div className="handoff-title-row"><div><p className="eyebrow">ENGINEERING CONTEXT</p><h4 id="handoff-heading">Engineering handoff report</h4></div><button className="button button-dark" type="button" onClick={buildHandoff} disabled={handoffBusy || backend !== "connected"}>{handoffBusy ? "Generating…" : handoff ? "Refresh report" : "Generate report"}</button></div>{handoff && <HandoffResult report={handoff} markdownStatus={markdownStatus} onCopy={copyHandoffMarkdown} onDownload={downloadHandoffMarkdown} />}</section>}
           </section>
         </div>
 
@@ -271,4 +394,75 @@ function ProposalResult({ proposal }: { proposal: CodeChangeProposal }) {
     <div className="runtime-not-run"><strong>Runtime validation: not run</strong><p>{proposal.runtime_validation_reason}</p></div>
     <p className="proposal-safety">Mock-generated proposal. No files were changed, approved, applied, or executed.</p>
   </section>;
+}
+
+function ReviewPanel({ proposal, status, history, reviewerIdentifier, setReviewerIdentifier, justification, setJustification, outstandingQuestions, setOutstandingQuestions, busy, onDecision }: {
+  proposal: CodeChangeProposal;
+  status: LocalReviewStatus | null;
+  history: ReviewHistory | null;
+  reviewerIdentifier: string;
+  setReviewerIdentifier: (value: string) => void;
+  justification: string;
+  setJustification: (value: string) => void;
+  outstandingQuestions: string;
+  setOutstandingQuestions: (value: string) => void;
+  busy: boolean;
+  onDecision: (decision: ReviewDecision) => void;
+}) {
+  const canReview = status?.enabled === true && proposal.lifecycle_state === "awaiting_review";
+  const reviewCompleted = Boolean(history?.reviews?.length) || ["review_approved", "changes_requested", "rejected"].includes(proposal.lifecycle_state);
+  const identifierError = reviewerIdentifierError(reviewerIdentifier);
+  return <section className="review-panel" aria-labelledby="review-heading">
+    <div className="handoff-title-row"><div><p className="eyebrow">HUMAN-IN-THE-LOOP</p><h4 id="review-heading">Human review</h4></div><Badge tone={canReview || reviewCompleted ? "good" : "muted"}>{reviewCompleted ? "Review Completed" : canReview ? "Local review enabled" : "Review Unavailable"}</Badge></div>
+    <div className="identity-warning" role="note"><strong>Local development only.</strong> Reviewer identifiers are unverified labels. An approval means accepted for further consideration; it does not apply or execute code.</div>
+    {!status?.enabled && <p className="review-disabled">Review decisions are disabled. Set <code>ENABLE_LOCAL_REVIEWS=true</code> in development and restart FastAPI.</p>}
+    {canReview && <div className="review-form">
+      <label htmlFor="reviewer-id">Local reviewer label</label>
+      <input id="reviewer-id" value={reviewerIdentifier} maxLength={64} onChange={(event) => setReviewerIdentifier(event.target.value)} autoComplete="off" aria-invalid={Boolean(identifierError)} aria-describedby="reviewer-id-format reviewer-id-error" />
+      <small id="reviewer-id-format">1–64 characters; begin with a letter or number, then use letters, numbers, periods, underscores, or hyphens. Example: <code>demo_reviewer</code>. Spaces and credential-like values are not accepted.</small>
+      {identifierError && <small id="reviewer-id-error" className="reviewer-input-error" role="alert">{identifierError}</small>}
+      <label htmlFor="review-justification">Decision justification <span>Required</span></label>
+      <textarea id="review-justification" value={justification} maxLength={2000} onChange={(event) => setJustification(event.target.value)} placeholder="Explain why this decision is appropriate." />
+      <label htmlFor="review-questions">Outstanding questions <span>Optional, one per line</span></label>
+      <textarea id="review-questions" value={outstandingQuestions} maxLength={3600} onChange={(event) => setOutstandingQuestions(event.target.value)} placeholder="Questions for the next engineer" />
+      <div className="review-actions">
+        <button className="button button-primary" type="button" onClick={() => onDecision("approve")} disabled={busy || Boolean(identifierError) || !justification.trim()}>Approve for consideration</button>
+        <button className="button button-dark" type="button" onClick={() => onDecision("request_changes")} disabled={busy || Boolean(identifierError) || !justification.trim()}>Request changes</button>
+        <button className="button button-reject" type="button" onClick={() => onDecision("reject")} disabled={busy || Boolean(identifierError) || !justification.trim()}>Reject proposal</button>
+      </div>
+      <small>Decision uses proposal version {proposal.version} and its source and diff hashes.</small>
+    </div>}
+    {history && <div className="review-history"><h5>Decision and audit history</h5>{history.reviews?.length ? history.reviews.map((review) => <article key={review.review_id}><strong>{review.decision.replaceAll("_", " ")} · {review.proposal_lifecycle_state.replaceAll("_", " ")}</strong><small>{review.reviewer_identifier} (unverified) · {new Date(review.timestamp).toLocaleString()}</small><p>{review.justification}</p>{review.outstanding_questions.length > 0 && <ul>{review.outstanding_questions.map((question) => <li key={question}>{question}</li>)}</ul>}</article>) : <p>No decisions recorded.</p>}{(history.audit_events ?? []).filter((event) => event.outcome === "rejected").map((event) => <article className="audit-rejection" key={event.event_id}><strong>Review submission rejected</strong><small>{event.reviewer_identifier} (unverified) · {new Date(event.timestamp).toLocaleString()}</small><p>{event.failure_reason ?? "The review could not be recorded."}</p></article>)}</div>}
+  </section>;
+}
+
+function HandoffResult({ report, markdownStatus, onCopy, onDownload }: { report: HandoffReport; markdownStatus: string; onCopy: () => void; onDownload: () => void }) {
+  return <div className="handoff-result" aria-live="polite">
+    <div className="handoff-report-toolbar"><Badge tone="good">Mock handoff · static evidence</Badge><div><button className="button button-dark" type="button" onClick={onCopy}>Copy Markdown</button><button className="button button-primary" type="button" onClick={onDownload}>Download Markdown</button></div></div>
+    {markdownStatus && <p className="markdown-status" role="status">{markdownStatus}</p>}
+    <h5>Project and task context</h5><p>{report.task.objective}</p><p>{report.task.current_progress}</p>
+    <h5>Verified technical context</h5><ul>{report.technical_understanding.verified_context.map((item) => <li key={item}>{item}</li>)}</ul>
+    <p><strong>Relevant files:</strong> {report.task.relevant_files.join(", ")}</p>
+    <h5>Planned implementation steps</h5>{report.task.planned_steps.length ? <ol>{report.task.planned_steps.map((step, index) => <li key={`${index}-${step}`}>{step.replace(/^\d+\.\s*/, "")}</li>)}</ol> : <p>None recorded</p>}
+    <h5>Planned validation</h5>{report.task.planned_validation_requirements.length ? <ul>{report.task.planned_validation_requirements.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None recorded</p>}
+    <p><strong>Modules:</strong> {report.technical_understanding.relevant_modules.map((module) => `${module.name} (${module.path})`).join(", ") || "None found"}</p>
+    <p><strong>Functions:</strong> {report.technical_understanding.relevant_functions.join(", ") || "None found"}</p>
+    <p><strong>Classes:</strong> {report.technical_understanding.relevant_classes.join(", ") || "None found"}</p>
+    <p><strong>Imports:</strong> {report.technical_understanding.relevant_imports.join("; ") || "None found"}</p>
+    <p><strong>Dependency manifests:</strong> {report.technical_understanding.dependency_manifests.join("; ") || "None found"}</p>
+    {report.technical_understanding.analysis_warnings.length > 0 && <><h5>Analysis warnings</h5><ul>{report.technical_understanding.analysis_warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></>}
+    <h5>Proposed change</h5><p>{report.proposed_change.summary}</p><p><strong>Source revision:</strong> {report.proposed_change.source_revision_status}</p>
+    <ul>{report.proposed_change.target_files.map((target) => <li key={target.path}>{target.path}:{target.source_reference.line} · SHA-256 {target.original_sha256}</li>)}</ul>
+    <p><strong>Diff SHA-256:</strong> {report.proposed_change.diff_sha256}</p>
+    <h5>Validation</h5><p><strong>Static checks</strong></p><ul>{report.validation_and_risks.static_checks.length ? report.validation_and_risks.static_checks.map((finding) => <li key={finding.check}>{finding.check}: {finding.status} — {finding.detail}</li>) : <li>None recorded</li>}</ul>
+    <p><strong>Runtime tests:</strong> {report.validation_and_risks.runtime_tests_status} — {report.validation_and_risks.runtime_tests_reason}</p>
+    <p><strong>Risks:</strong> {report.validation_and_risks.risks.join("; ") || "None recorded"}</p>
+    <p><strong>Assumptions:</strong> {report.validation_and_risks.assumptions.join("; ") || "None recorded"}</p>
+    <p><strong>Unresolved dependencies:</strong> {report.validation_and_risks.unresolved_dependencies.join("; ") || "None recorded"}</p>
+    <p><strong>Missing evidence:</strong> {report.validation_and_risks.unsupported_evidence.join("; ") || "None recorded"}</p>
+    <h5>Outstanding questions</h5><ul>{report.outstanding_questions.map((question) => <li key={question}>{question}</li>)}</ul>
+    <h5>Human decisions</h5>{report.human_decisions.length ? report.human_decisions.map((decision) => <article className="handoff-decision" key={decision.review_id}><strong>{decision.decision.replaceAll("_", " ")}</strong><small>{decision.reviewer_identifier} (unverified local-development label) · {new Date(decision.timestamp).toLocaleString()}</small><p>{decision.justification}</p></article>) : <p>No human decision recorded.</p>}
+    <h5>Next engineer actions</h5><ul>{report.next_engineer_actions.map((action, index) => <li key={`${index}-${action.action}`}>{action.action}{action.required_approval ? " (further approval required)" : ""}</li>)}</ul>
+    <p className="provenance-note">{report.provenance_note}</p>
+  </div>;
 }

@@ -10,6 +10,17 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+const disabledReviewStatus = { enabled: false, environment: "development", identity_status: "unverified_local_development" };
+const enabledReviewStatus = { ...disabledReviewStatus, enabled: true };
+
+function routeFetch(responses: Record<string, unknown | Response>, reviewStatus = disabledReviewStatus) {
+  return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>((input) => {
+    const key = String(input).replace("/api/backend/", "");
+    const value = key === "health" ? { status: "ok" } : key === "api/v1/reviews/status" ? reviewStatus : responses[key];
+    return Promise.resolve(value instanceof Response ? value : jsonResponse(value ?? {}));
+  });
+}
+
 const repositoryAnalysis = {
   summary: {
     repository_id: "planning-fixture", file_count: 5, python_file_count: 3,
@@ -42,18 +53,30 @@ const codeProposal = {
   target_files: [{ path: "package/calculator.py", original_sha256: "a".repeat(64), source_reference: { path: "package/calculator.py", line: 1, end_line: 2 } }],
   proposed_change_summary: "Raise ValueError when denominator is zero.",
   unified_diff: "--- a/package/calculator.py\n+++ b/package/calculator.py\n@@ -1,2 +1,4 @@\n def divide(numerator, denominator):\n+    if denominator == 0:\n+        raise ValueError('denominator must not be zero')\n     return numerator / denominator\n",
+  diff_sha256: "b".repeat(64),
   risk_classification: "low", validation_findings: [
     { check: "python_syntax", status: "passed", detail: "AST parse passed without execution." },
     { check: "runtime_isolation", status: "not_run", detail: "No trusted isolated executor is configured." },
   ], static_validation_status: "passed", runtime_validation_status: "not_run",
   runtime_validation_reason: "No trusted isolated executor is configured; repository code was not executed on the host.",
   provider: "mock", is_mock: true, created_at: "2026-10-21T00:00:00Z",
-  lifecycle_state: "awaiting_review", human_approval_required: true,
+  lifecycle_state: "awaiting_review", human_approval_required: true, version: 1,
+};
+
+const handoffReport = {
+  report_id: "550e8400-e29b-41d4-a716-446655440000", generated_at: "2026-10-21T00:00:00Z", repository_id: "planning-fixture",
+  task: { task_id: "plan-test", objective: taskPlan.task_description, current_progress: "A plan and static proposal are available; no review decision has been recorded.", task_status: "planned", proposal_lifecycle_state: "awaiting_review", proposal_version: 1, relevant_files: taskPlan.relevant_files, source_references: taskPlan.source_references, planned_steps: ["1. Inspect division"], planned_validation_requirements: ["Run tests"] },
+  technical_understanding: { analysis_summary: repositoryAnalysis.summary, relevant_modules: repositoryAnalysis.modules, relevant_functions: ["divide (package/calculator.py:1)"], relevant_classes: [], relevant_imports: [], dependency_manifests: ["requirements.txt: pytest>=8"], verified_context: ["Current static scan found one Python module."], analysis_warnings: [] },
+  proposed_change: { summary: codeProposal.proposed_change_summary, target_files: codeProposal.target_files, diff_sha256: codeProposal.diff_sha256, static_validation_status: "passed", validation_findings: codeProposal.validation_findings, provider: "mock", is_mock: true, source_revision_status: "current" },
+  human_decisions: [], outstanding_questions: [],
+  validation_and_risks: { static_checks: codeProposal.validation_findings, runtime_tests_status: "not_run", runtime_tests_reason: codeProposal.runtime_validation_reason, risks: taskPlan.risks, assumptions: [], unresolved_dependencies: [], unsupported_evidence: [] },
+  next_engineer_actions: [{ action: "A local reviewer should inspect the proposal.", required_approval: true, status: "pending" }],
+  provenance_note: "Static evidence and mock-generated proposal. No code executed.", provider: "mock", is_mock: true,
 };
 
 describe("DevRelay dashboard", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ status: "ok" })));
+    vi.stubGlobal("fetch", routeFetch({}));
   });
 
   it("renders the dashboard identity, tools, and unavailable roadmap", async () => {
@@ -74,9 +97,7 @@ describe("DevRelay dashboard", () => {
   });
 
   it("runs repository analysis and displays modules, symbols, imports, and warnings", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
-      .mockResolvedValueOnce(jsonResponse(repositoryAnalysis));
+    const fetchMock = routeFetch({ "api/v1/repositories/analyze": repositoryAnalysis });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<Dashboard />);
@@ -92,13 +113,11 @@ describe("DevRelay dashboard", () => {
     if (!imports) throw new Error("Imports detail section was not rendered");
     await user.click(within(imports).getByText(/Imports & dependency manifests/));
     expect(await within(imports).findByText(/package\.calculator/)).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/backend/api/v1/repositories/analyze", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/api/v1/repositories/analyze", expect.objectContaining({ method: "POST" }));
   });
 
   it("submits a planning task and clearly labels deterministic mock output", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
-      .mockResolvedValueOnce(jsonResponse(taskPlan));
+    const fetchMock = routeFetch({ "api/v1/tasks/plan": taskPlan });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<Dashboard />);
@@ -110,14 +129,11 @@ describe("DevRelay dashboard", () => {
     expect(screen.getByText("Human approval required")).toBeInTheDocument();
     expect(screen.getByText("Execution has not started")).toBeInTheDocument();
     expect(screen.getByText("Inspect division behavior and add a regression test.")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/backend/api/v1/tasks/plan", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/api/v1/tasks/plan", expect.objectContaining({ method: "POST" }));
   });
 
   it("creates and displays a mock review proposal without apply actions", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
-      .mockResolvedValueOnce(jsonResponse(taskPlan))
-      .mockResolvedValueOnce(jsonResponse(codeProposal, 201));
+    const fetchMock = routeFetch({ "api/v1/tasks/plan": taskPlan, "api/v1/proposals/create": jsonResponse(codeProposal, 201) });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<Dashboard />);
@@ -126,17 +142,135 @@ describe("DevRelay dashboard", () => {
     await user.click(screen.getByRole("button", { name: /generate plan/i }));
     await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
     expect(await screen.findByRole("heading", { name: "Code change proposal" })).toBeInTheDocument();
+    expect(screen.getByText("Review Unavailable")).toBeInTheDocument();
     expect(screen.getByText("Source SHA-256:", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("Runtime validation: not run")).toBeInTheDocument();
     expect(screen.getByText(/No files were changed, approved, applied, or executed/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /apply|approve/i })).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/backend/api/v1/proposals/create", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/api/v1/proposals/create", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("renders the generated handoff and exposes Markdown export controls", async () => {
+    const completedReport = {
+      ...handoffReport,
+      task: { ...handoffReport.task, proposal_lifecycle_state: "review_approved", current_progress: "A review decision is recorded; the proposal remains unapplied and unexecuted." },
+      human_decisions: [{
+        review_id: "review-1", proposal_id: codeProposal.proposal_id, task_id: taskPlan.task_id,
+        repository_id: "planning-fixture", decision: "approve", reviewer_identifier: "demo_reviewer",
+        reviewer_identity_status: "unverified_local_development", justification: "Reviewed the static diff.",
+        timestamp: "2026-10-21T00:00:00Z", proposal_version: 1,
+        source_sha256: codeProposal.target_files[0].original_sha256, diff_sha256: codeProposal.diff_sha256,
+        proposal_lifecycle_state: "review_approved", evidence_references: codeProposal.target_files.map((item) => item.source_reference),
+        static_validation_status: "passed", runtime_validation_status: "not_run", outstanding_questions: [],
+      }],
+    };
+    const fetchMock = routeFetch({
+      "api/v1/tasks/plan": taskPlan,
+      "api/v1/proposals/create": jsonResponse(codeProposal, 201),
+      "api/v1/handoffs": jsonResponse(completedReport, 201),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
+    await user.click(await screen.findByRole("button", { name: /generate report/i }));
+    expect(await screen.findByText("Engineering handoff report")).toBeInTheDocument();
+    expect(screen.getByText("Runtime tests:", { exact: false })).toBeInTheDocument();
+    const formattedTimestamp = new Date("2026-10-21T00:00:00Z").toLocaleString();
+    expect(screen.getByText(`demo_reviewer (unverified local-development label) · ${formattedTimestamp}`)).toBeInTheDocument();
+    expect(screen.getByText("Reviewed the static diff.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy Markdown" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Markdown" })).toBeInTheDocument();
+  });
+
+  it("shows local review controls only when the backend reports the flag enabled", async () => {
+    const reviewHistory = {
+      proposal_id: codeProposal.proposal_id, current_lifecycle_state: "awaiting_review", current_proposal_version: 1,
+      reviews: [], audit_events: [],
+    };
+    const reviewRecord = {
+      review_id: "review-id", proposal_id: codeProposal.proposal_id, task_id: taskPlan.task_id,
+      repository_id: "planning-fixture", decision: "approve", reviewer_identifier: "local-reviewer",
+      reviewer_identity_status: "unverified_local_development", justification: "Static diff reviewed.",
+      timestamp: "2026-10-21T00:00:00Z", proposal_version: 1,
+      source_sha256: codeProposal.target_files[0].original_sha256, diff_sha256: codeProposal.diff_sha256,
+      proposal_lifecycle_state: "review_approved", evidence_references: codeProposal.target_files.map((item) => item.source_reference),
+      static_validation_status: "passed", runtime_validation_status: "not_run", outstanding_questions: [],
+    };
+    const fetchMock = routeFetch({
+      "api/v1/tasks/plan": taskPlan,
+      "api/v1/proposals/create": jsonResponse(codeProposal, 201),
+      [`api/v1/reviews/${codeProposal.proposal_id}`]: reviewHistory,
+      "api/v1/reviews": jsonResponse(reviewRecord, 201),
+    }, enabledReviewStatus);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
+    expect(await screen.findByText("Local development only.")).toBeInTheDocument();
+    const justification = await screen.findByLabelText(/decision justification/i);
+    const reviewer = screen.getByLabelText("Local reviewer label");
+    await user.clear(reviewer);
+    await user.type(reviewer, "demo_reviewer");
+    await user.type(justification, "Static diff reviewed.");
+    await user.click(screen.getByRole("button", { name: /approve for consideration/i }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/backend/api/v1/reviews", expect.objectContaining({ method: "POST" }));
+    const submittedReview = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/v1/reviews"));
+    expect(JSON.parse(String(submittedReview?.[1]?.body))).toMatchObject({ reviewer_identifier: "demo_reviewer" });
+    expect(await screen.findByText(/does not apply or execute code/i)).toBeInTheDocument();
+    expect(screen.getByText("Review Completed")).toBeInTheDocument();
+  });
+
+  it("explains and rejects unsupported reviewer labels before submitting", async () => {
+    const fetchMock = routeFetch({
+      "api/v1/tasks/plan": taskPlan,
+      "api/v1/proposals/create": jsonResponse(codeProposal, 201),
+    }, enabledReviewStatus);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
+
+    expect(screen.getByText((_, element) => element?.tagName === "SMALL" && Boolean(element.textContent?.includes("Example: demo_reviewer")))).toBeInTheDocument();
+    const reviewer = screen.getByLabelText("Local reviewer label");
+    await user.clear(reviewer);
+    await user.type(reviewer, "Demo Reviewer");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Spaces are not allowed.");
+    expect(screen.getByRole("button", { name: /approve for consideration/i })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/api/v1/reviews"))).toBe(false);
+  });
+
+  it("shows a sanitized explanation when the backend rejects a review payload", async () => {
+    const fetchMock = routeFetch({
+      "api/v1/tasks/plan": taskPlan,
+      "api/v1/proposals/create": jsonResponse(codeProposal, 201),
+      "api/v1/reviews": jsonResponse({ error: { code: "proposal_validation_failed", message: "Review request validation failed. Check the decision, identity label, hashes, and justification." } }, 422),
+    }, enabledReviewStatus);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
+    await user.type(screen.getByLabelText(/decision justification/i), "Reviewed the change.");
+    await user.click(screen.getByRole("button", { name: /approve for consideration/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The review was not recorded. Check the reviewer label format and required review fields; no decision was saved.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("proposal_validation_failed");
   });
 
   it("shows sanitized backend errors and recovers after dismissal", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
-      .mockResolvedValueOnce(jsonResponse({ error: { code: "repository_not_found", message: "Repository is not configured for analysis." } }, 404));
+    const fetchMock = routeFetch({ "api/v1/repositories/analyze": jsonResponse({ error: { code: "repository_not_found", message: "Repository is not configured for analysis." } }, 404) });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<Dashboard />);
@@ -148,9 +282,7 @@ describe("DevRelay dashboard", () => {
   });
 
   it("reports malformed backend JSON without crashing the page", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ status: "ok" }))
-      .mockResolvedValueOnce(new Response("not json", { status: 200 }));
+    const fetchMock = routeFetch({ "api/v1/repositories/analyze": new Response("not json", { status: 200 }) });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<Dashboard />);
