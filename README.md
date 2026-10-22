@@ -1,6 +1,6 @@
 # DevRelay AI
 
-An open-source engineering handoff agent powered by NVIDIA Nemotron and Nebius. The Python backend provides bounded static repository analysis, evidence-backed task planning, and a deterministic, human-reviewable calculator code proposal. Proposals are not applied and repository code is not executed.
+An open-source engineering handoff agent with configurable Nebius-hosted NVIDIA Nemotron planning. The Python backend provides bounded static repository analysis, evidence-backed task planning, and a deterministic, human-reviewable calculator code proposal. Proposals are not applied and repository code is not executed.
 
 ## Quick start
 
@@ -22,6 +22,8 @@ Phase 5A adds a disabled-by-default local review workflow and evidence-based han
 Phase 5B adds a separately disabled, loopback-only runtime-validation authorization and evidence workflow for the fixed synthetic calculator proposal. The current checkout has no trusted sandbox executor, so readiness fails closed and authorized attempts return `sandbox_unavailable`; **no repository tests or code are run**. Do not enable this feature expecting execution. See [docs/setup.md](docs/setup.md) and [docs/architecture.md](docs/architecture.md) for the threat model and current limits.
 
 For offline planning, set `INFERENCE_PROVIDER=mock`. The deterministic mock supports only named synthetic evaluation scenarios; unsupported requests return an explicit unsupported result. It does not represent NVIDIA Nemotron output.
+
+Phase 6B adds an explicitly opted-in Nebius planning provider. The application defaults to mock even when an API key is configured; use `INFERENCE_PROVIDER=nebius` only after checking billing controls. Requests are bounded by prompt/output token limits and one in-flight call per process. Truncated or malformed answers are rejected, and successful plans expose only safe model, latency, and token-usage metadata. No automatic retry, mock fallback, code application, or repository execution is added. See [docs/setup.md](docs/setup.md) for the separately authorized smoke-test command; it has not been run as part of implementation.
 
 ## Local dashboard
 

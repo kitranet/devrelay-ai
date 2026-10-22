@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.models.inference import InferenceDiagnostics
 from app.models.repository import SourceReference
 
 
@@ -41,6 +42,7 @@ class TaskPlan(BaseModel):
     unsupported_references: list[str] = Field(default_factory=list, max_length=50)
     provider: Literal["nebius", "mock"]
     is_mock: bool
+    inference_diagnostics: InferenceDiagnostics | None = None
 
 
 class PlanGeneration(BaseModel):

@@ -11,8 +11,8 @@ import uuid
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.core.errors import TaskPlanValidationError, TaskPlanningContextLimitError, TaskPlanningTimeoutError
-from app.models.inference import ChatMessage, InferenceRequest
+from app.core.errors import ModelEmptyResponseError, ModelIncompleteResponseError, SensitiveInferenceContentError, TaskPlanValidationError, TaskPlanningContextLimitError, TaskPlanningTimeoutError
+from app.models.inference import ChatMessage, InferenceRequest, InferenceResponse, diagnostics_for
 from app.models.repository import RepositoryAnalysisResponse, SourceReference
 from app.models.task import PlanGeneration, PlanStep, TaskPlan, TaskPlanningRequest
 from app.services.inference import InferenceService
@@ -21,12 +21,22 @@ from app.services.repository_analysis import RepositoryScanner
 logger = logging.getLogger(__name__)
 _WORD = re.compile(r"[a-z0-9_]{3,}")
 _STOP_WORDS = {"the", "and", "for", "with", "that", "this", "from", "into", "existing", "please", "add", "fix"}
+_SECRET_LIKE = re.compile(
+    r"(?i)(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
+    r"(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+|"
+    r"nvapi-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})"
+)
 _UNSAFE_TASK_PATTERNS = (
     re.compile(r"\b(exfiltrat(?:e|ion)|steal credentials|credential theft)\b", re.IGNORECASE),
     re.compile(r"\b(ransomware|deploy malware|credential stealer|keylogger)\b", re.IGNORECASE),
     re.compile(r"\b(bypass authentication|evade detection|disable audit logging)\b", re.IGNORECASE),
     re.compile(r"\b(run|execute) arbitrary shell commands?\b", re.IGNORECASE),
 )
+
+
+def _contains_sensitive_text(value: str, configured_key: str | None) -> bool:
+    """Detect likely credentials without logging or returning the matched text."""
+    return bool((configured_key and configured_key in value) or _SECRET_LIKE.search(value))
 
 
 class TaskPlanningService:
@@ -54,25 +64,38 @@ class TaskPlanningService:
                     is_mock=self.settings.inference_provider == "mock",
                     assumptions=["No analyzable Python modules were found in this repository."],
                 )
+            configured_key = self.settings.nebius_api_key.get_secret_value() if self.settings.nebius_api_key else None
+            if _contains_sensitive_text(request.task_description, configured_key):
+                raise SensitiveInferenceContentError()
             context = self._context(request.task_description, analysis)
             encoded = json.dumps(context, ensure_ascii=True, separators=(",", ":"))
             if len(encoded) > self.settings.task_context_max_chars:
                 encoded = json.dumps(self._context(request.task_description, analysis, budget=self.settings.task_context_max_chars // 2), separators=(",", ":"))
             if len(encoded) > self.settings.task_context_max_chars:
                 raise TaskPlanningContextLimitError()
+            if _contains_sensitive_text(encoded, configured_key):
+                raise SensitiveInferenceContentError()
             inference = await asyncio.wait_for(
                 self.inference.generate(InferenceRequest(messages=[
                     ChatMessage(role="system", content=(
                         "Create a conservative engineering plan using only the supplied static repository analysis. "
-                        "Return one JSON object matching the requested schema. Cite only supplied source references. "
+                        "Return one JSON object matching the requested schema; do not include private chain-of-thought. "
+                        "Cite only supplied source references. "
                         "Do not claim to inspect source content that is absent. Unknown or ambiguous tasks must use status unsupported or insufficient_context."
                     )),
                     ChatMessage(role="user", content="DEVRELAY_PLAN_REQUEST\n" + encoded),
-                ], max_tokens=2048)),
+                ], max_tokens=self.settings.nebius_max_output_tokens)),
                 timeout=self.settings.task_planning_timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
             raise TaskPlanningTimeoutError() from exc
+        configured_key = self.settings.nebius_api_key.get_secret_value() if self.settings.nebius_api_key else None
+        if _contains_sensitive_text(inference.content, configured_key):
+            raise SensitiveInferenceContentError()
+        if inference.completion_status != "completed":
+            raise ModelIncompleteResponseError()
+        if not inference.content.strip():
+            raise ModelEmptyResponseError()
         try:
             generation = PlanGeneration.model_validate_json(inference.content)
         except (ValidationError, ValueError):
@@ -85,9 +108,10 @@ class TaskPlanningService:
                 task_description=request.task_description, status="unsupported",
                 human_approval_required=True, provider=inference.provider, is_mock=inference.is_mock,
                 assumptions=["The configured provider does not have a defined response for this request."],
+                inference_diagnostics=diagnostics_for(inference),
             )
 
-        return self._validate_evidence(generation, request, analysis, inference.provider, inference.is_mock)
+        return self._validate_evidence(generation, request, analysis, inference)
 
     def _context(self, task_description: str, analysis: RepositoryAnalysisResponse, budget: int | None = None) -> dict:
         tokens = {word for word in _WORD.findall(task_description.lower()) if word not in _STOP_WORDS}
@@ -140,7 +164,7 @@ class TaskPlanningService:
     @staticmethod
     def _validate_evidence(
         generation: PlanGeneration, request: TaskPlanningRequest, analysis: RepositoryAnalysisResponse,
-        provider: str, is_mock: bool,
+        inference: InferenceResponse,
     ) -> TaskPlan:
         paths = {item.path for item in analysis.files}
         references = {
@@ -190,5 +214,6 @@ class TaskPlanningService:
             risks=generation.risks, dependencies=generation.dependencies,
             validation_requirements=generation.validation_requirements,
             human_approval_required=True, assumptions=generation.assumptions,
-            unsupported_references=sorted(set(unsupported)), provider=provider, is_mock=is_mock,
+            unsupported_references=sorted(set(unsupported)), provider=inference.provider, is_mock=inference.is_mock,
+            inference_diagnostics=diagnostics_for(inference),
         )

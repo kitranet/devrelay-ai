@@ -24,12 +24,15 @@ Set values in the local, git-ignored `.env` file or the process environment. `NE
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NEBIUS_BASE_URL` | `https://api.tokenfactory.us-central1.nebius.com/v1/` | HTTPS Nebius Token Factory API base; only `api.tokenfactory[.<region>].nebius.com` hosts are accepted |
-| `NEBIUS_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Model identifier |
+| `NEBIUS_BASE_URL` | `https://api.tokenfactory.nebius.com/v1/` | HTTPS Nebius Token Factory API base; only `api.tokenfactory[.<region>].nebius.com` hosts are accepted |
+| `NEBIUS_MODEL` | `nvidia/Nemotron-3_5-Lightning` | Model identifier |
 | `NEBIUS_API_KEY` | unset | Runtime API key for inference |
 | `NEBIUS_TIMEOUT_SECONDS` | `30` | Per-request timeout; range 0–600 (exclusive of 0) |
+| `NEBIUS_MAX_OUTPUT_TOKENS` | `1024` | Maximum completion token budget per request |
+| `NEBIUS_MAX_PROMPT_TOKENS` | `6000` | Maximum estimated prompt tokens; estimator uses serialized UTF-8 size and is not the provider tokenizer |
+| `NEBIUS_MAX_IN_FLIGHT_REQUESTS` | `1` | Per-process concurrent paid request limit; keep at one for initial integration |
 | `LOG_LEVEL` | `INFO` | Standard Python logging level |
-| `INFERENCE_PROVIDER` | `nebius` | Select `nebius` or deterministic offline `mock` provider |
+| `INFERENCE_PROVIDER` | `mock` | Select `mock` by default; set `nebius` explicitly to make paid requests |
 | `ENABLE_LOCAL_REVIEWS` | `false` | Enables unverified local review only when `ENVIRONMENT=development`; keep disabled for production |
 | `ENABLE_ISOLATED_RUNTIME_VALIDATION` | `false` | Enables the separate local authorization/evidence workflow in development; does not make a sandbox available |
 | `ENVIRONMENT` | `development` | Application environment; local reviews cannot be enabled outside development |
@@ -113,7 +116,9 @@ Open `http://localhost:3000`. `NEXT_PUBLIC_REPOSITORY_IDS` contains only configu
 
 Restart FastAPI after changing its environment. Restart the Next.js development server after changing `frontend/.env.local`, especially the public repository IDs. Use `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` in `frontend/`. The dashboard is local-development only: no authentication, no repository discovery endpoint, no code changes or execution, and no production deployment configuration are included.
 
-The example environment selects `INFERENCE_PROVIDER=mock` so local development does not need billing access. Set `INFERENCE_PROVIDER=mock` to explicitly select deterministic, offline test responses. Responses identify themselves with `provider="mock"`, `is_mock=true`, and a `devrelay-mock-v1` model name. Mock is never selected automatically after a Nebius error. Phase 2 has no public inference route; the provider is available through the application inference service for local wiring and tests.
+The example environment and application default select `INFERENCE_PROVIDER=mock`, including when `NEBIUS_API_KEY` is configured. Live inference requires explicit `INFERENCE_PROVIDER=nebius`; the Nebius client also refuses direct calls unless this opt-in is set. Mock responses identify themselves with `provider="mock"`, `is_mock=true`, and `devrelay-mock-v1`. Nebius failures never fall back to mock. Planning output carries safe provider/model/completion/latency/token diagnostics; it never carries prompts, provider response bodies, headers, or model reasoning. No streaming is used.
+
+Paid calls are bounded by a 1,024-token completion maximum, a 6,000 estimated prompt-token maximum, the existing task-context character limit, and one in-flight request per backend process by default. The prompt estimator is an approximate local guard, not a tokenizer guarantee. The concurrency gate is process-local; run a single backend worker for the initial integration or use a separately reviewed shared limiter before multi-worker use. HTTPX is configured without automatic retries. Token ceilings are not dollar caps. No model price table is configured, and trial credit is not a hard spending limit; use provider-side billing controls for account-level limits.
 
 ## Local review and engineering handoff (Phase 5A)
 
@@ -187,13 +192,20 @@ npm run build
 
 ## Genuine inference smoke test
 
-Set `NEBIUS_API_KEY` securely in the process environment or ignored `.env`, then run:
+This is a separately authorized manual action. It sends one real paid request; no automated test invokes it. Configure the API key through an approved local secret store or the ignored `.env` file; never put it in chat or a tracked file. In the same PowerShell process, explicitly opt in and use the reviewed defaults:
 
 ```powershell
+$env:INFERENCE_PROVIDER = "nebius"
+$env:NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
+$env:NEBIUS_MODEL = "nvidia/Nemotron-3_5-Lightning"
+$env:NEBIUS_MAX_OUTPUT_TOKENS = "1024"
+$env:NEBIUS_MAX_PROMPT_TOKENS = "6000"
+$env:NEBIUS_MAX_IN_FLIGHT_REQUESTS = "1"
+# Ensure NEBIUS_API_KEY is set locally through your approved secret mechanism.
 python -m scripts.inference_smoke_test
 ```
 
-This sends a real request and may incur provider charges. It is separate from the tests and has not been run as part of setup unless explicitly reported.
+The script makes one request, prints only safe completion metadata, and does not print the answer or key. It propagates sanitized failures; an incomplete `length` response is not success. This action may incur provider charges. Token limits are not a guaranteed spending cap, so check the provider billing controls before proceeding. Do not run this as part of automated tests.
 
 
 ## Phase 5B: isolated runtime validation status

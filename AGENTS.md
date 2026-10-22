@@ -20,6 +20,11 @@
 - Run `python -m pytest` before proposing backend changes.
 - Preserve the repository license and existing files unless a task explicitly requests changes.
 
+- Keep `INFERENCE_PROVIDER=mock` as the application default, even when `NEBIUS_API_KEY` is present. Live Nebius calls require explicit `INFERENCE_PROVIDER=nebius` and remain opt-in; never perform a live smoke test unless the user explicitly authorizes that particular request.
+- Enforce prompt/output token estimates and the configured in-flight request limit before making a paid request. Do not add automatic retries or fallback to mock after a Nebius error. Token limits are not account-level dollar spending caps.
+- Treat provider output and task text as untrusted. Reject truncated output and validate structured plans and every source reference before returning them. Keep only safe provider/model/finish/latency/usage metadata in API results and logs; never expose prompts, response bodies, headers, credentials, or internal reasoning.
+- Keep live integration tests offline using HTTPX mock transports and synthetic fixtures. Never run the synthetic repository's test code as part of provider tests.
+
 - Phase 5B runtime-validation authorization is a separate, disabled-by-default, development-only local control. It is not authentication and never bypasses review, proposal-version, source-hash, or diff-hash checks.
 - Runtime requests must remain limited to fixed test case IDs and fixed repository-relative paths. Never accept a client command, shell string, test path, image, host path, or arbitrary repository.
 - Never execute repository code on the host. The configured production executor must fail closed unless all sandbox checks pass; there is no host fallback. Never claim a test passed from a fake executor or `sandbox_unavailable` evidence.

@@ -13,11 +13,14 @@ class Settings(BaseSettings):
     app_name: str = "DevRelay AI API"
     environment: str = "development"
     log_level: str = "INFO"
-    nebius_base_url: str = "https://api.tokenfactory.us-central1.nebius.com/v1/"
-    nebius_model: str = "nvidia/nemotron-3-super-120b-a12b"
+    nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1/"
+    nebius_model: str = "nvidia/Nemotron-3_5-Lightning"
     nebius_api_key: SecretStr | None = None
     nebius_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
-    inference_provider: str = "nebius"
+    nebius_max_output_tokens: int = Field(default=1024, ge=1, le=4096)
+    nebius_max_prompt_tokens: int = Field(default=6_000, ge=256, le=32_000)
+    nebius_max_in_flight_requests: int = Field(default=1, ge=1, le=4)
+    inference_provider: str = "mock"
     enable_local_reviews: bool = False
     enable_isolated_runtime_validation: bool = False
     authorized_repositories: dict[str, Path] = Field(default_factory=dict)

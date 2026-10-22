@@ -2,7 +2,7 @@
 
 The backend uses FastAPI as its HTTP boundary and Pydantic models for validated settings and data contracts. `app/api` contains route handlers; `app/models` contains API schemas; `app/services` is reserved for application use cases; `app/integrations` contains external provider adapters; `app/core` owns settings, logging, and shared error mapping.
 
-The Nebius adapter calls the Token Factory OpenAI-compatible `POST /chat/completions` endpoint over HTTPS. Base URL, model, key, and timeout are configurable. Credentials are represented by Pydantic `SecretStr`, supplied only in the authorization header, and omitted from logs. Provider details are converted to sanitized domain errors.
+The Nebius adapter calls the Token Factory chat-completions endpoint over HTTPS using configurable base URL, model, key, timeout, token limits, prompt-size estimate, and process-local in-flight limit. Credentials use Pydantic `SecretStr` and are sent only in the authorization header. Logs contain bounded model/status/latency/token metadata, never request messages, headers, provider bodies, or reasoning text. The client does not retry. It rejects over-budget requests before sending and distinguishes completed, truncated, empty, malformed, timeout, and provider-error outcomes. Only `finish_reason=stop` with non-empty content is accepted as a completed response; task planning then parses its schema and validates evidence. The prompt-size check is a conservative heuristic, not a provider tokenizer or billing limit.
 
 The service exposes `GET /health`; the model client is independently testable with `httpx.MockTransport`. No shell execution or repository-writing agent is included. The local Next.js dashboard talks through a loopback-only route proxy.
 
@@ -10,7 +10,7 @@ The service exposes `GET /health`; the model client is independently testable wi
 
 `POST /api/v1/repositories/analyze` accepts a configured repository ID, never a path. IDs map through `AUTHORIZED_REPOSITORIES` to absolute roots supplied by the operator. `RepositoryScanner` walks with bounded file count, per-file and aggregate bytes, traversal depth, and processing time. It skips secret paths, generated directories, binaries, and all symlinks. Python is parsed with `ast`; TOML, INI, requirements, and lock manifests are parsed as data. Target code is never imported or executed. Results contain repository-relative POSIX paths and line references, not absolute root paths.
 
-Inference provider selection is explicit through `INFERENCE_PROVIDER=nebius|mock`. The mock provider is deterministic and offline, labels results with `provider=mock` and `is_mock=true`, and never claims Nemotron provenance. Nebius failures are returned as errors; there is no mock fallback.
+Inference provider selection is explicit through `INFERENCE_PROVIDER=nebius|mock`; the application default is `mock`, even with an API key configured. The Nebius client itself also requires explicit opt-in. The mock provider is deterministic and offline, labels results with `provider=mock` and `is_mock=true`, and never claims Nemotron provenance. Nebius failures are returned as errors; there is no mock fallback. Completed plans include an additive `inference_diagnostics` object with provider, reported/requested model identity, completion status, finish reason, latency, and usage counts when supplied. No reasoning content is returned.
 
 ## Engineering task planning
 
@@ -20,7 +20,7 @@ Every cited source reference must match a function, class, or import reference e
 
 The mock provider supports only the three synthetic evaluation scenarios documented in setup. Unknown or ambiguous tasks return `unsupported`, with no steps or claimed files. These tests measure deterministic schema and evidence handling, not model reasoning accuracy.
 
-Nebius's official [Nemotron 3 Super cookbook quickstart](https://github.com/nebius/token-factory-cookbook/blob/main/models/nemotron/nemotron3-super-120B.md) confirms the configured regional base URL, model identifier, and chat completions usage.
+The configured live model is `nvidia/Nemotron-3_5-Lightning` at `https://api.tokenfactory.nebius.com/v1/`. Connectivity and a complete structured answer are separate checks; an HTTP success with `finish_reason=length` is not a usable plan.
 
 ## Safe code proposals (Phase 4B)
 

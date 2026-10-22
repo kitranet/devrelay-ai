@@ -343,3 +343,22 @@ h1, h2, h3, h4, p { margin-top: 0; }
   .footer { flex-wrap: wrap; gap: 7px 10px; }
   .footer > span:nth-child(2) { width: 100%; order: 2; }
 }
+
+.inference-diagnostics {
+  display: grid;
+  gap: 0.55rem;
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid #dce6df;
+  border-radius: 0.75rem;
+  background: #f6f9f6;
+  color: #20352d;
+  font-size: 0.88rem;
+}
+
+.inference-diagnostics > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  color: #63746c;
+}

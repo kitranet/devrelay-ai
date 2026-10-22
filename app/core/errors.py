@@ -22,6 +22,14 @@ class MissingCredentialsError(ApplicationError):
     code = "missing_credentials"
 
 
+class LiveInferenceDisabledError(ApplicationError):
+    status_code = 403
+    code = "live_inference_disabled"
+
+    def __init__(self) -> None:
+        super().__init__("Live inference requires explicit INFERENCE_PROVIDER=nebius opt-in.")
+
+
 class ModelTimeoutError(ApplicationError):
     status_code = 504
     code = "model_timeout"
@@ -30,6 +38,46 @@ class ModelTimeoutError(ApplicationError):
 class ModelProviderError(ApplicationError):
     status_code = 502
     code = "model_provider_error"
+
+
+class ModelIncompleteResponseError(ApplicationError):
+    status_code = 502
+    code = "incomplete_model_response"
+
+    def __init__(self) -> None:
+        super().__init__("The model response was truncated before a complete answer was produced.")
+
+
+class ModelEmptyResponseError(ApplicationError):
+    status_code = 502
+    code = "empty_model_response"
+
+    def __init__(self) -> None:
+        super().__init__("The inference provider returned an empty answer.")
+
+
+class MalformedModelResponseError(ApplicationError):
+    status_code = 502
+    code = "invalid_model_response"
+
+    def __init__(self) -> None:
+        super().__init__("The inference provider returned a malformed response.")
+
+
+class InferenceLimitError(ApplicationError):
+    status_code = 429
+    code = "inference_limit_exceeded"
+
+    def __init__(self, message: str = "The inference request exceeds a configured application limit.") -> None:
+        super().__init__(message)
+
+
+class SensitiveInferenceContentError(ApplicationError):
+    status_code = 422
+    code = "sensitive_inference_content"
+
+    def __init__(self) -> None:
+        super().__init__("Planning input or provider output contains credential-like content and was rejected.")
 
 
 class RepositoryNotAuthorizedError(ApplicationError):

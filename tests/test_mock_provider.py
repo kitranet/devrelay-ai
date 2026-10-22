@@ -5,6 +5,7 @@ from app.core.config import Settings
 from app.core.errors import MissingCredentialsError
 from app.models.inference import ChatMessage, InferenceRequest
 from app.services.inference import build_inference_service
+from app.services.mock_inference import MockModelProvider
 
 
 def test_mock_provider_is_selected_explicitly_and_is_deterministic_without_credentials():
@@ -31,3 +32,15 @@ def test_nebius_failure_does_not_fall_back_to_mock():
             await service.generate(request)
 
     asyncio.run(generate())
+
+
+def test_default_provider_stays_mock_even_when_a_key_is_configured(monkeypatch):
+    monkeypatch.delenv("INFERENCE_PROVIDER", raising=False)
+    settings = Settings(nebius_api_key="unit-test-key", _env_file=None)
+    service = build_inference_service(settings)
+    assert settings.inference_provider == "mock"
+    assert isinstance(service._provider, MockModelProvider)
+
+    request = InferenceRequest(messages=[ChatMessage(role="user", content="mock://health")])
+    response = asyncio.run(service.generate(request))
+    assert response.provider == "mock" and response.is_mock is True

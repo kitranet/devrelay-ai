@@ -27,6 +27,10 @@ class MockModelProvider:
             content=content,
             provider="mock",
             is_mock=True,
+            completion_status="completed",
+            finish_reason="mock_complete",
+            model_reported_by_provider=True,
+            usage=None,
         )
 
     @staticmethod
