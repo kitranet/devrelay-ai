@@ -19,3 +19,9 @@
 - Report runtime validation as `not_run` until a trusted isolated executor exists. Never imply host execution or successful tests from static parsing.
 - Run `python -m pytest` before proposing backend changes.
 - Preserve the repository license and existing files unless a task explicitly requests changes.
+
+- Phase 5B runtime-validation authorization is a separate, disabled-by-default, development-only local control. It is not authentication and never bypasses review, proposal-version, source-hash, or diff-hash checks.
+- Runtime requests must remain limited to fixed test case IDs and fixed repository-relative paths. Never accept a client command, shell string, test path, image, host path, or arbitrary repository.
+- Never execute repository code on the host. The configured production executor must fail closed unless all sandbox checks pass; there is no host fallback. Never claim a test passed from a fake executor or `sandbox_unavailable` evidence.
+- Runtime evidence and one-use reservations are bounded process-local prototype data, not durable audit records. Sanitize and bound logs, redact secrets/absolute paths, and verify cleanup before a successful result.
+- Preserve the current status honestly: no trusted sandbox launcher or verified immutable local image is configured in this checkout. Do not enable runtime execution or claim sandbox readiness until a separately reviewed executor actually enforces the required isolation controls.

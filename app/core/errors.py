@@ -157,6 +157,38 @@ class ReviewPayloadTooLargeError(ApplicationError):
         super().__init__("The review request exceeds the local size limit.")
 
 
+class RuntimeValidationDisabledError(ApplicationError):
+    status_code = 404
+    code = "runtime_validation_disabled"
+
+    def __init__(self) -> None:
+        super().__init__("Isolated runtime validation is disabled outside opted-in loopback development use.")
+
+
+class RuntimeValidationNotFoundError(ApplicationError):
+    status_code = 404
+    code = "runtime_validation_not_found"
+
+    def __init__(self) -> None:
+        super().__init__("Runtime validation evidence is not available in this application session.")
+
+
+class RuntimeAuthorizationConflictError(ApplicationError):
+    status_code = 409
+    code = "runtime_authorization_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("This proposal revision already has a runtime-validation authorization attempt.")
+
+
+class RuntimeValidationPayloadTooLargeError(ApplicationError):
+    status_code = 413
+    code = "runtime_validation_payload_too_large"
+
+    def __init__(self) -> None:
+        super().__init__("The runtime-validation request exceeds the local size limit.")
+
+
 def register_exception_handlers(application: FastAPI) -> None:
     @application.exception_handler(ApplicationError)
     async def application_error_handler(_: Request, exc: ApplicationError) -> JSONResponse:

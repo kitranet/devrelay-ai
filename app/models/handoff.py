@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.models.proposal import ProposalTargetFile, ProposalValidationFinding
 from app.models.repository import RepositoryModule, RepositorySummary, SourceReference
 from app.models.review import ReviewRecord
+from app.models.runtime_validation import RuntimeValidationStatus
 
 
 class HandoffTaskContext(BaseModel):
@@ -52,12 +53,26 @@ class HandoffProposedChange(BaseModel):
 
 class HandoffValidationRisk(BaseModel):
     static_checks: list[ProposalValidationFinding]
-    runtime_tests_status: Literal["not_run"]
+    runtime_tests_status: RuntimeValidationStatus | Literal["not_run"]
     runtime_tests_reason: str
     risks: list[str]
     assumptions: list[str]
     unresolved_dependencies: list[str]
     unsupported_evidence: list[str]
+
+
+class HandoffRuntimeExecution(BaseModel):
+    status: RuntimeValidationStatus | Literal["not_run"] = "not_run"
+    sandbox_summary: str
+    evidence_id: UUID | None = None
+    test_case: str = "calculator_unit_tests"
+    test_command_id: str = "calculator_pytest_suite_v1"
+    exit_code: int | None = None
+    duration_ms: int | None = Field(default=None, ge=0, le=600_000)
+    test_results: list[str]
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    diff_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    remaining_work: list[str]
 
 
 class HandoffNextAction(BaseModel):
@@ -76,6 +91,7 @@ class HandoffReport(BaseModel):
     human_decisions: list[ReviewRecord]
     outstanding_questions: list[str]
     validation_and_risks: HandoffValidationRisk
+    runtime_execution: HandoffRuntimeExecution
     next_engineer_actions: list[HandoffNextAction]
     provenance_note: str = Field(min_length=1, max_length=500)
     provider: Literal["mock"]

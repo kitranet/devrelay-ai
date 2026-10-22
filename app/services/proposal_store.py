@@ -9,6 +9,7 @@ from uuid import UUID
 
 from app.models.proposal import CodeChangeProposal
 from app.models.handoff import HandoffReport
+from app.models.runtime_validation import RuntimeValidationEvidence
 from app.models.review import AuditEvent, ReviewRecord
 from app.models.task import TaskPlan
 from app.core.errors import ProposalNotFoundError, ProposalVersionConflictError, ReviewTransitionConflictError
@@ -143,3 +144,38 @@ class InMemoryHandoffStore:
         with self._lock:
             report = self._records.get(report_id)
             return report.model_copy(deep=True) if report else None
+
+
+class InMemoryRuntimeValidationStore:
+    """Bounded process-local evidence store with one authorization per proposal revision."""
+
+    def __init__(self, max_records: int = 512) -> None:
+        self._max_records = max_records
+        self._records: OrderedDict[UUID, RuntimeValidationEvidence] = OrderedDict()
+        self._by_revision: dict[tuple[UUID, int], UUID] = {}
+        self._lock = RLock()
+
+    def reserve(self, evidence: RuntimeValidationEvidence) -> bool:
+        key = (evidence.proposal_id, evidence.proposal_version)
+        with self._lock:
+            if key in self._by_revision or len(self._records) >= self._max_records:
+                return False
+            self._records[evidence.evidence_id] = evidence.model_copy(deep=True)
+            self._by_revision[key] = evidence.evidence_id
+            return True
+
+    def update(self, evidence: RuntimeValidationEvidence) -> None:
+        with self._lock:
+            if evidence.evidence_id not in self._records:
+                return
+            self._records[evidence.evidence_id] = evidence.model_copy(deep=True)
+
+    def get(self, evidence_id: UUID) -> RuntimeValidationEvidence | None:
+        with self._lock:
+            evidence = self._records.get(evidence_id)
+            return evidence.model_copy(deep=True) if evidence else None
+
+    def latest_for_proposal(self, proposal_id: UUID) -> RuntimeValidationEvidence | None:
+        with self._lock:
+            matching = [item for item in self._records.values() if item.proposal_id == proposal_id]
+            return matching[-1].model_copy(deep=True) if matching else None

@@ -82,4 +82,31 @@ describe("local backend proxy", () => {
     expect(malformed.status).toBe(404);
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
+
+  it("allows only runtime-validation readiness, request, and UUID evidence routes", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{"status":"disabled"}', {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.BACKEND_API_URL = "http://127.0.0.1:8001";
+    const readiness = await GET(new NextRequest("http://localhost/api/backend/api/v1/runtime-validation/readiness"), {
+      params: Promise.resolve({ path: ["api", "v1", "runtime-validation", "readiness"] }),
+    });
+    expect(readiness.status).toBe(200);
+    const payload = JSON.stringify({ authorization: { authorizer_identifier: "local_authorizer", purpose: "Verify this reviewed test patch." } });
+    const requested = await POST(new NextRequest("http://localhost/api/backend/api/v1/runtime-validation", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: payload,
+    }), { params: Promise.resolve({ path: ["api", "v1", "runtime-validation"] }) });
+    expect(requested.status).toBe(200);
+    const evidenceId = "01e6d118-3477-45df-9a1a-0cfaf17d4ae8";
+    const evidence = await GET(new NextRequest(`http://localhost/api/backend/api/v1/runtime-validation/${evidenceId}`), {
+      params: Promise.resolve({ path: ["api", "v1", "runtime-validation", evidenceId] }),
+    });
+    expect(evidence.status).toBe(200);
+    const malformed = await GET(new NextRequest("http://localhost/api/backend/api/v1/runtime-validation/not-a-uuid"), {
+      params: Promise.resolve({ path: ["api", "v1", "runtime-validation", "not-a-uuid"] }),
+    });
+    expect(malformed.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

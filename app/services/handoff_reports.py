@@ -11,6 +11,7 @@ from app.models.handoff import (
     HandoffNextAction,
     HandoffProposedChange,
     HandoffReport,
+    HandoffRuntimeExecution,
     HandoffTaskContext,
     HandoffTechnicalUnderstanding,
     HandoffValidationRisk,
@@ -20,6 +21,7 @@ from app.services.proposal_store import (
     InMemoryHandoffStore,
     InMemoryProposalStore,
     InMemoryReviewStore,
+    InMemoryRuntimeValidationStore,
     InMemoryTaskPlanStore,
 )
 from app.services.repository_analysis import RepositoryScanner
@@ -32,6 +34,7 @@ class HandoffReportService:
         proposals: InMemoryProposalStore,
         plans: InMemoryTaskPlanStore,
         reviews: InMemoryReviewStore,
+        runtime_validations: InMemoryRuntimeValidationStore,
         reports: InMemoryHandoffStore,
         settings: Settings,
     ) -> None:
@@ -39,6 +42,7 @@ class HandoffReportService:
         self.proposals = proposals
         self.plans = plans
         self.reviews = reviews
+        self.runtime_validations = runtime_validations
         self.reports = reports
         self.settings = settings
 
@@ -78,6 +82,7 @@ class HandoffReportService:
             current_revision = False
 
         history = self.reviews.history(proposal_id)
+        runtime = self.runtime_validations.latest_for_proposal(proposal_id)
         outstanding_questions = [
             question for record in history for question in record.outstanding_questions
         ]
@@ -87,6 +92,22 @@ class HandoffReportService:
         warnings = [f"{warning.code}: {warning.message}" for warning in analysis.warnings]
         unsupported = list(plan.unsupported_references) + warnings
         actions = self._next_actions(proposal.lifecycle_state, plan.validation_requirements)
+        runtime_status = runtime.status if runtime else "not_run"
+        runtime_reason = runtime.failure_reason if runtime and runtime.failure_reason else (
+            "No runtime-validation authorization has been submitted." if runtime is None else
+            "The isolated test command completed successfully." if runtime.status == "passed" else
+            "The isolated test command completed with a non-zero exit." if runtime.status == "failed" else
+            "The isolated test command exceeded its wall-clock timeout." if runtime.status == "timed_out" else
+            "No trusted isolated sandbox was available; no test code was run." if runtime.status == "sandbox_unavailable" else
+            "Runtime validation is in progress."
+        )
+        remaining_runtime_work = (
+            ["Configure and verify a hardened Linux sandbox with a pinned local image before any runtime tests can execute."]
+            if runtime_status in {"not_run", "sandbox_unavailable"} else
+            ["Review the captured runtime evidence and decide separately whether any implementation work should proceed."]
+            if runtime_status == "passed" else
+            ["Inspect the isolated test failure or timeout and create a revised proposal before requesting a new authorization."]
+        )
         if not current_revision:
             actions.insert(0, HandoffNextAction(
                 action="Do not use this stale proposal; generate a new task plan and proposal from the current source revision.",
@@ -139,12 +160,25 @@ class HandoffReportService:
             outstanding_questions=outstanding_questions,
             validation_and_risks=HandoffValidationRisk(
                 static_checks=proposal.validation_findings,
-                runtime_tests_status="not_run",
-                runtime_tests_reason=proposal.runtime_validation_reason,
+                runtime_tests_status=runtime_status,
+                runtime_tests_reason=runtime_reason,
                 risks=risks,
                 assumptions=plan.assumptions,
                 unresolved_dependencies=plan.dependencies,
                 unsupported_evidence=unsupported,
+            ),
+            runtime_execution=HandoffRuntimeExecution(
+                status=runtime_status,
+                sandbox_summary=runtime.sandbox_summary if runtime else "No runtime validation has been authorized or executed.",
+                evidence_id=runtime.evidence_id if runtime else None,
+                test_case=runtime.test_case if runtime else "calculator_unit_tests",
+                test_command_id=runtime.test_command_id if runtime else "calculator_pytest_suite_v1",
+                exit_code=runtime.exit_code if runtime else None,
+                duration_ms=runtime.duration_ms if runtime else None,
+                test_results=runtime.test_results if runtime else [],
+                source_sha256=proposal.target_files[0].original_sha256,
+                diff_sha256=proposal.diff_sha256,
+                remaining_work=remaining_runtime_work,
             ),
             next_engineer_actions=actions,
             provenance_note=(

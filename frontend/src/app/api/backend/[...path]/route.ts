@@ -8,6 +8,8 @@ const ROUTES = new Map<string, { method: "GET" | "POST"; upstream: string }>([
   ["api/v1/reviews/status", { method: "GET", upstream: "/api/v1/reviews/status" }],
   ["api/v1/reviews", { method: "POST", upstream: "/api/v1/reviews" }],
   ["api/v1/handoffs", { method: "POST", upstream: "/api/v1/handoffs" }],
+  ["api/v1/runtime-validation/readiness", { method: "GET", upstream: "/api/v1/runtime-validation/readiness" }],
+  ["api/v1/runtime-validation", { method: "POST", upstream: "/api/v1/runtime-validation" }],
 ]);
 
 type RouteContext = { params: Promise<{ path: string[] }> };
@@ -21,7 +23,7 @@ async function proxy(request: NextRequest, context: RouteContext) {
   const pathKey = path.join("/");
   const route = ROUTES.get(pathKey) ?? (
     request.method === "GET" && path.length === 4 && path[0] === "api" && path[1] === "v1" &&
-    ["reviews", "handoffs"].includes(path[2]) && /^[0-9a-f-]{36}$/i.test(path[3])
+    ["reviews", "handoffs", "runtime-validation"].includes(path[2]) && /^[0-9a-f-]{36}$/i.test(path[3])
       ? { method: "GET" as const, upstream: `/${pathKey}` }
       : undefined
   );

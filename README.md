@@ -19,6 +19,8 @@ Phase 4B adds `POST /api/v1/proposals/create` for the predefined division-by-zer
 
 Phase 5A adds a disabled-by-default local review workflow and evidence-based handoff reports. Set `ENABLE_LOCAL_REVIEWS=true` only in development to enable loopback review requests. Reviewer labels are unverified, and an approval only accepts a proposal for further consideration; it does not apply code. Review and report storage is process-local and non-durable. See [docs/setup.md](docs/setup.md) for safe local demonstration steps.
 
+Phase 5B adds a separately disabled, loopback-only runtime-validation authorization and evidence workflow for the fixed synthetic calculator proposal. The current checkout has no trusted sandbox executor, so readiness fails closed and authorized attempts return `sandbox_unavailable`; **no repository tests or code are run**. Do not enable this feature expecting execution. See [docs/setup.md](docs/setup.md) and [docs/architecture.md](docs/architecture.md) for the threat model and current limits.
+
 For offline planning, set `INFERENCE_PROVIDER=mock`. The deterministic mock supports only named synthetic evaluation scenarios; unsupported requests return an explicit unsupported result. It does not represent NVIDIA Nemotron output.
 
 ## Local dashboard

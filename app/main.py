@@ -9,6 +9,7 @@ from app.api.routes import handoffs
 from app.api.routes import proposals
 from app.api.routes import repositories
 from app.api.routes import reviews
+from app.api.routes import runtime_validation
 from app.api.routes import tasks
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -16,7 +17,8 @@ from app.core.errors import register_exception_handlers
 from app.core.config import Settings
 from app.services.repository_analysis import RepositoryScanner
 from app.services.inference import build_inference_service
-from app.services.proposal_store import InMemoryHandoffStore, InMemoryProposalStore, InMemoryReviewStore, InMemoryTaskPlanStore
+from app.services.proposal_store import InMemoryHandoffStore, InMemoryProposalStore, InMemoryReviewStore, InMemoryRuntimeValidationStore, InMemoryTaskPlanStore
+from app.services.runtime_validation import UnavailableSandboxExecutor
 
 
 @asynccontextmanager
@@ -41,6 +43,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.proposal_store = InMemoryProposalStore()
     application.state.review_store = InMemoryReviewStore()
     application.state.handoff_store = InMemoryHandoffStore()
+    application.state.runtime_validation_store = InMemoryRuntimeValidationStore()
+    application.state.runtime_validation_executor = UnavailableSandboxExecutor()
     application.state.settings = configured_settings
     application.include_router(health.router)
     application.include_router(repositories.router)
@@ -48,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(proposals.router)
     application.include_router(reviews.router)
     application.include_router(handoffs.router)
+    application.include_router(runtime_validation.router)
     return application
 
 

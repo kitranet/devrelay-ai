@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import Dashboard from "@/components/dashboard";
+import type { SandboxReadiness } from "@/lib/types";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -12,11 +13,17 @@ function jsonResponse(body: unknown, status = 200) {
 
 const disabledReviewStatus = { enabled: false, environment: "development", identity_status: "unverified_local_development" };
 const enabledReviewStatus = { ...disabledReviewStatus, enabled: true };
+const disabledSandboxReadiness = {
+  enabled: false, environment: "development", available: false, status: "disabled" as const,
+  test_case: "calculator_unit_tests" as const, test_command_id: "calculator_pytest_suite_v1",
+  checks: [{ name: "development_feature_flag", status: "failed" as const, detail: "Feature flag is disabled." }],
+  limitations: ["No repository test code is run on the host."],
+};
 
-function routeFetch(responses: Record<string, unknown | Response>, reviewStatus = disabledReviewStatus) {
+function routeFetch(responses: Record<string, unknown | Response>, reviewStatus = disabledReviewStatus, sandboxReadiness: SandboxReadiness = disabledSandboxReadiness) {
   return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>((input) => {
     const key = String(input).replace("/api/backend/", "");
-    const value = key === "health" ? { status: "ok" } : key === "api/v1/reviews/status" ? reviewStatus : responses[key];
+    const value = key === "health" ? { status: "ok" } : key === "api/v1/reviews/status" ? reviewStatus : key === "api/v1/runtime-validation/readiness" ? sandboxReadiness : responses[key];
     return Promise.resolve(value instanceof Response ? value : jsonResponse(value ?? {}));
   });
 }
@@ -70,6 +77,7 @@ const handoffReport = {
   proposed_change: { summary: codeProposal.proposed_change_summary, target_files: codeProposal.target_files, diff_sha256: codeProposal.diff_sha256, static_validation_status: "passed", validation_findings: codeProposal.validation_findings, provider: "mock", is_mock: true, source_revision_status: "current" },
   human_decisions: [], outstanding_questions: [],
   validation_and_risks: { static_checks: codeProposal.validation_findings, runtime_tests_status: "not_run", runtime_tests_reason: codeProposal.runtime_validation_reason, risks: taskPlan.risks, assumptions: [], unresolved_dependencies: [], unsupported_evidence: [] },
+  runtime_execution: { status: "not_run", sandbox_summary: "No trusted sandbox configured.", evidence_id: null, test_case: "calculator_unit_tests", test_command_id: "calculator_pytest_suite_v1", exit_code: null, duration_ms: null, test_results: [], source_sha256: codeProposal.target_files[0].original_sha256, diff_sha256: codeProposal.diff_sha256, remaining_work: ["Configure a trusted sandbox."] },
   next_engineer_actions: [{ action: "A local reviewer should inspect the proposal.", required_approval: true, status: "pending" }],
   provenance_note: "Static evidence and mock-generated proposal. No code executed.", provider: "mock", is_mock: true,
 };
@@ -143,7 +151,9 @@ describe("DevRelay dashboard", () => {
     await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
     expect(await screen.findByRole("heading", { name: "Code change proposal" })).toBeInTheDocument();
     expect(screen.getByText("Review Unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Source SHA-256:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Execution disabled")).toBeInTheDocument();
+    expect(screen.getByText(/repository tests are never run directly on Windows/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Source SHA-256:", { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getByText("Runtime validation: not run")).toBeInTheDocument();
     expect(screen.getByText(/No files were changed, approved, applied, or executed/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /apply|approve/i })).not.toBeInTheDocument();
@@ -267,6 +277,59 @@ describe("DevRelay dashboard", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The review was not recorded. Check the reviewer label format and required review fields; no decision was saved.");
     expect(screen.getByRole("alert")).not.toHaveTextContent("proposal_validation_failed");
+  });
+
+  it("requires a separate execution purpose and reports unavailable sandbox without claiming a test run", async () => {
+    const executionEvidence = {
+      evidence_id: "runtime-evidence-1", proposal_id: codeProposal.proposal_id, repository_id: "planning-fixture",
+      status: "sandbox_unavailable", requested_at: "2026-10-22T00:00:00Z", completed_at: "2026-10-22T00:00:00Z",
+      proposal_version: 2, source_sha256: codeProposal.target_files[0].original_sha256, diff_sha256: codeProposal.diff_sha256,
+      test_case: "calculator_unit_tests", test_command_id: "calculator_pytest_suite_v1", authorizer_identifier: "local_authorizer",
+      authorizer_identity_status: "unverified_local_development", authorization_purpose: "Check if isolated validation is ready.",
+      sandbox_summary: "Runtime execution refused because one or more sandbox readiness checks failed.",
+      readiness_checks: [{ name: "docker_cli", status: "failed", detail: "Docker CLI is unavailable." }],
+      exit_code: null, duration_ms: null, stdout: "", stderr: "", test_results: [],
+      failure_reason: "No trusted isolated sandbox is available; no test code was run.",
+      original_repository_modified: false, code_applied_to_original: false,
+    };
+    const reviewRecord = {
+      review_id: "review-1", proposal_id: codeProposal.proposal_id, task_id: taskPlan.task_id,
+      repository_id: "planning-fixture", decision: "approve", reviewer_identifier: "demo_reviewer",
+      reviewer_identity_status: "unverified_local_development", justification: "Reviewed the static diff.",
+      timestamp: "2026-10-22T00:00:00Z", proposal_version: 1,
+      source_sha256: codeProposal.target_files[0].original_sha256, diff_sha256: codeProposal.diff_sha256,
+      proposal_lifecycle_state: "review_approved", evidence_references: codeProposal.target_files.map((item) => item.source_reference),
+      static_validation_status: "passed", runtime_validation_status: "not_run", outstanding_questions: [],
+    };
+    const readyFeatureUnavailable: SandboxReadiness = { ...disabledSandboxReadiness, enabled: true, status: "sandbox_unavailable" };
+    const fetchMock = routeFetch({
+      "api/v1/tasks/plan": taskPlan,
+      "api/v1/proposals/create": jsonResponse(codeProposal, 201),
+      "api/v1/reviews": jsonResponse(reviewRecord, 201),
+      "api/v1/runtime-validation": jsonResponse(executionEvidence, 202),
+    }, enabledReviewStatus, readyFeatureUnavailable);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    await user.click(await screen.findByRole("button", { name: /generate code proposal/i }));
+    await user.type(screen.getByLabelText(/decision justification/i), "Reviewed the static diff.");
+    await user.click(screen.getByRole("button", { name: /approve for consideration/i }));
+
+    expect(await screen.findByText("Review Completed")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Purpose for this one-time validation"), "Check if isolated validation is ready.");
+    await user.click(screen.getByRole("button", { name: "Authorize one validation request" }));
+    expect(await screen.findByText("Outcome:", { exact: false })).toBeInTheDocument();
+    expect(screen.getAllByText("sandbox_unavailable").length).toBeGreaterThan(0);
+    expect(screen.getByText(/no test code was run/i)).toBeInTheDocument();
+    expect(screen.getByText(/Patch applied to original:/)).toBeInTheDocument();
+    const runtimeCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/v1/runtime-validation"));
+    expect(JSON.parse(String(runtimeCall?.[1]?.body))).toMatchObject({
+      test_case: "calculator_unit_tests",
+      authorization: { authorizer_identifier: "local_authorizer", purpose: "Check if isolated validation is ready." },
+    });
   });
 
   it("shows sanitized backend errors and recovers after dismissal", async () => {

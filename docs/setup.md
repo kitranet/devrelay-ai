@@ -31,6 +31,7 @@ Set values in the local, git-ignored `.env` file or the process environment. `NE
 | `LOG_LEVEL` | `INFO` | Standard Python logging level |
 | `INFERENCE_PROVIDER` | `nebius` | Select `nebius` or deterministic offline `mock` provider |
 | `ENABLE_LOCAL_REVIEWS` | `false` | Enables unverified local review only when `ENVIRONMENT=development`; keep disabled for production |
+| `ENABLE_ISOLATED_RUNTIME_VALIDATION` | `false` | Enables the separate local authorization/evidence workflow in development; does not make a sandbox available |
 | `ENVIRONMENT` | `development` | Application environment; local reviews cannot be enabled outside development |
 | `AUTHORIZED_REPOSITORIES` | `{}` | JSON mapping of repository IDs to absolute local roots |
 | `REPOSITORY_MAX_FILES` | `2000` | Maximum regular files considered |
@@ -193,3 +194,38 @@ python -m scripts.inference_smoke_test
 ```
 
 This sends a real request and may incur provider charges. It is separate from the tests and has not been run as part of setup unless explicitly reported.
+
+
+## Phase 5B: isolated runtime validation status
+
+The runtime-validation control is separate from review approval. It requires a current proposal in `review_approved`, matching proposal version/source hash/diff hash, the fixed synthetic repository and target, and a separate local authorization label plus purpose. The label is unverified and is not authentication. The only accepted case is `calculator_unit_tests` (fixed command ID `calculator_pytest_suite_v1`); clients cannot submit commands, paths, or arbitrary tests.
+
+The API exposes:
+
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/runtime-validation/readiness` | Report feature, host and sandbox readiness checks |
+| `POST` | `/api/v1/runtime-validation` | Submit one version/hash-bound local execution authorization and receive evidence |
+| `GET` | `/api/v1/runtime-validation/{evidence_id}` | Retrieve evidence held in this process |
+
+To inspect readiness, use `Invoke-RestMethod http://127.0.0.1:8001/api/v1/runtime-validation/readiness`. The feature defaults off. If deliberately demonstrating the authorization flow locally, set `ENVIRONMENT=development`, `ENABLE_LOCAL_REVIEWS=true`, and `ENABLE_ISOLATED_RUNTIME_VALIDATION=true` in the backend process environment, then restart FastAPI. This will **not** enable code execution: the current executor fails closed because this checkout has no verified Linux sandbox, immutable local image, or hardened launcher. A request may create `sandbox_unavailable` evidence while explicitly recording that no test code ran. Do not treat this response as a test result or enable the setting in production.
+
+The request body uses IDs and hashes from the current approved proposal:
+
+```json
+{
+  "proposal_id": "00000000-0000-0000-0000-000000000000",
+  "proposal_version": 2,
+  "source_sha256": "<64 lowercase hex characters from the proposal>",
+  "diff_sha256": "<64 lowercase hex characters from the proposal>",
+  "test_case": "calculator_unit_tests",
+  "authorization": {
+    "authorizer_identifier": "local-authorizer",
+    "purpose": "Validate the reviewed calculator proposal."
+  }
+}
+```
+
+Call with `Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/api/v1/runtime-validation -ContentType 'application/json' -Body ($body | ConvertTo-Json -Depth 5)`. Configure the dashboard's `NEXT_PUBLIC_EXECUTION_AUTHORIZER_ID` as an unverified pseudonymous label. Do not put secrets or personal information in the purpose. Readiness/evidence APIs do not expose repository absolute paths. Evidence and replay-prevention state are bounded and process-local, not durable or tamper-proof.
+
+No Docker or WSL installation, image download, or container smoke test was performed. The unit-test fake executor is only an orchestration test double and never runs repository code. This phase therefore does not satisfy the prerequisite for an authenticated runtime inference or sandbox test. A trusted sandbox executor and independently reviewed host controls are a prerequisite milestone before runtime testing can be enabled.

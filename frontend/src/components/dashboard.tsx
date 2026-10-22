@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { analyzeRepository, checkBackend, createProposal, generateHandoff, getLocalReviewStatus, getReviewHistory, planTask, submitReview } from "@/lib/api";
+import { analyzeRepository, checkBackend, createProposal, generateHandoff, getLocalReviewStatus, getReviewHistory, getSandboxReadiness, planTask, requestRuntimeValidation, submitReview } from "@/lib/api";
 import { handoffToMarkdown } from "@/lib/handoff-markdown";
-import type { CodeChangeProposal, HandoffReport, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, TaskPlan } from "@/lib/types";
+import type { CodeChangeProposal, HandoffReport, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
 
 type BackendState = "checking" | "connected" | "offline";
 const reviewerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -51,15 +51,20 @@ export default function Dashboard() {
   const [proposal, setProposal] = useState<CodeChangeProposal | null>(null);
   const [reviewStatus, setReviewStatus] = useState<LocalReviewStatus | null>(null);
   const [reviewHistory, setReviewHistory] = useState<ReviewHistory | null>(null);
+  const [sandboxReadiness, setSandboxReadiness] = useState<SandboxReadiness | null>(null);
+  const [runtimeEvidence, setRuntimeEvidence] = useState<RuntimeValidationEvidence | null>(null);
   const [handoff, setHandoff] = useState<HandoffReport | null>(null);
   const [reviewerIdentifier, setReviewerIdentifier] = useState(process.env.NEXT_PUBLIC_LOCAL_REVIEWER_ID ?? "local-reviewer");
   const [reviewJustification, setReviewJustification] = useState("");
   const [outstandingQuestions, setOutstandingQuestions] = useState("");
+  const [executionAuthorizer, setExecutionAuthorizer] = useState(process.env.NEXT_PUBLIC_EXECUTION_AUTHORIZER_ID ?? "local_authorizer");
+  const [executionPurpose, setExecutionPurpose] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [proposalBusy, setProposalBusy] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [markdownStatus, setMarkdownStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +85,10 @@ export default function Dashboard() {
 
   useEffect(() => {
     getLocalReviewStatus().then(setReviewStatus).catch(() => setReviewStatus(null));
+  }, []);
+
+  useEffect(() => {
+    getSandboxReadiness().then(setSandboxReadiness).catch(() => setSandboxReadiness(null));
   }, []);
 
   useEffect(() => {
@@ -125,6 +134,7 @@ export default function Dashboard() {
       setPlan(nextPlan);
       setProposal(null);
       setReviewHistory(null);
+      setRuntimeEvidence(null);
       setHandoff(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Task planning failed.");
@@ -141,6 +151,7 @@ export default function Dashboard() {
       const nextProposal = await createProposal(repositoryId, plan.task_id);
       setProposal(nextProposal);
       setReviewHistory(null);
+      setRuntimeEvidence(null);
       setHandoff(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Proposal generation failed.");
@@ -199,6 +210,29 @@ export default function Dashboard() {
       setError(reason instanceof Error ? reason.message : "Handoff report generation failed.");
     } finally {
       setHandoffBusy(false);
+    }
+  }
+
+  async function requestRuntimeRun() {
+    if (!proposal || !sandboxReadiness?.enabled || proposal.lifecycle_state !== "review_approved") return;
+    setRuntimeBusy(true);
+    setError(null);
+    try {
+      const evidence = await requestRuntimeValidation({
+        proposal_id: proposal.proposal_id,
+        proposal_version: proposal.version,
+        source_sha256: proposal.target_files[0].original_sha256,
+        diff_sha256: proposal.diff_sha256,
+        test_case: "calculator_unit_tests",
+        authorization: { authorizer_identifier: executionAuthorizer.trim(), purpose: executionPurpose.trim() },
+      });
+      setRuntimeEvidence(evidence);
+      setExecutionPurpose("");
+      setHandoff(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Runtime validation request failed.");
+    } finally {
+      setRuntimeBusy(false);
     }
   }
 
@@ -342,6 +376,7 @@ export default function Dashboard() {
             {plan?.status === "planned" && plan.is_mock && /division by zero/i.test(plan.task_description) && !proposal && <div className="proposal-action"><p>This fixed mock scenario can produce a review-only patch. The source file will remain unchanged.</p><button className="button button-primary" type="button" onClick={generateProposal} disabled={proposalBusy || backend !== "connected"}>{proposalBusy ? <><span className="spinner" /> Preparing proposal</> : <>Generate code proposal <span aria-hidden="true">→</span></>}</button></div>}
             {proposal && <ProposalResult proposal={proposal} />}
             {proposal && <ReviewPanel proposal={proposal} status={reviewStatus} history={reviewHistory} reviewerIdentifier={reviewerIdentifier} setReviewerIdentifier={setReviewerIdentifier} justification={reviewJustification} setJustification={setReviewJustification} outstandingQuestions={outstandingQuestions} setOutstandingQuestions={setOutstandingQuestions} busy={reviewBusy} onDecision={recordReview} />}
+            {proposal && <RuntimeValidationPanel proposal={proposal} readiness={sandboxReadiness} evidence={runtimeEvidence} authorizer={executionAuthorizer} setAuthorizer={setExecutionAuthorizer} purpose={executionPurpose} setPurpose={setExecutionPurpose} busy={runtimeBusy} onRequest={requestRuntimeRun} />}
             {proposal && <section className="handoff-section" aria-labelledby="handoff-heading"><div className="handoff-title-row"><div><p className="eyebrow">ENGINEERING CONTEXT</p><h4 id="handoff-heading">Engineering handoff report</h4></div><button className="button button-dark" type="button" onClick={buildHandoff} disabled={handoffBusy || backend !== "connected"}>{handoffBusy ? "Generating…" : handoff ? "Refresh report" : "Generate report"}</button></div>{handoff && <HandoffResult report={handoff} markdownStatus={markdownStatus} onCopy={copyHandoffMarkdown} onDownload={downloadHandoffMarkdown} />}</section>}
           </section>
         </div>
@@ -436,6 +471,50 @@ function ReviewPanel({ proposal, status, history, reviewerIdentifier, setReviewe
   </section>;
 }
 
+function RuntimeValidationPanel({ proposal, readiness, evidence, authorizer, setAuthorizer, purpose, setPurpose, busy, onRequest }: {
+  proposal: CodeChangeProposal;
+  readiness: SandboxReadiness | null;
+  evidence: RuntimeValidationEvidence | null;
+  authorizer: string;
+  setAuthorizer: (value: string) => void;
+  purpose: string;
+  setPurpose: (value: string) => void;
+  busy: boolean;
+  onRequest: () => void;
+}) {
+  const eligible = proposal.lifecycle_state === "review_approved";
+  const validAuthorizer = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(authorizer.trim());
+  return <section className="runtime-validation-panel" aria-labelledby="runtime-validation-heading">
+    <div className="handoff-title-row"><div><p className="eyebrow">SEPARATE EXECUTION AUTHORIZATION</p><h4 id="runtime-validation-heading">Isolated runtime validation</h4></div><Badge tone={readiness?.available ? "good" : "muted"}>{readiness?.available ? "Sandbox ready" : readiness?.enabled ? "Sandbox unavailable" : "Execution disabled"}</Badge></div>
+    <div className="identity-warning" role="note"><strong>Review approval does not authorize execution.</strong> Each run requires a separate purpose and an unverified local authorizer label. The original repository will remain unchanged.</div>
+    <p><strong>Selected test suite:</strong> <code>calculator_unit_tests</code> · command ID <code>calculator_pytest_suite_v1</code></p>
+    <p><strong>Source SHA-256:</strong> <code>{proposal.target_files[0].original_sha256}</code></p>
+    <p><strong>Diff SHA-256:</strong> <code>{proposal.diff_sha256}</code></p>
+    {!readiness && <p role="status">Sandbox readiness could not be read. Runtime validation remains not run.</p>}
+    {readiness && <><p><strong>Readiness:</strong> {readiness.status === "disabled" ? "Feature flag disabled." : readiness.available ? "All checks passed." : "Required isolation checks failed; no code was run."}</p><ul className="sandbox-checks">{readiness.checks.map((check) => <li key={check.name}><strong>{check.name}:</strong> {check.status} — {check.detail}</li>)}</ul>{readiness.limitations.map((item) => <small className="sandbox-limitation" key={item}>{item}</small>)}</>}
+    {readiness?.enabled && eligible && !evidence && <div className="runtime-authorization-form">
+      <label htmlFor="execution-authorizer">Execution authorizer label</label>
+      <input id="execution-authorizer" value={authorizer} maxLength={64} onChange={(event) => setAuthorizer(event.target.value)} autoComplete="off" />
+      <small>Unverified local-development identity; use a label such as <code>local_authorizer</code>.</small>
+      <label htmlFor="execution-purpose">Purpose for this one-time validation</label>
+      <textarea id="execution-purpose" value={purpose} maxLength={300} onChange={(event) => setPurpose(event.target.value)} placeholder="Explain why this reviewed proposal needs isolated validation." />
+      <button className="button button-dark" type="button" onClick={onRequest} disabled={busy || !validAuthorizer || purpose.trim().length < 10}>{busy ? "Recording authorization…" : "Authorize one validation request"}</button>
+    </div>}
+    {readiness?.enabled && !eligible && !evidence && <p>Runtime validation is available only for a proposal in the review-approved state.</p>}
+    {evidence && <div className="runtime-evidence" aria-live="polite">
+      <h5>Execution evidence</h5><p><strong>Outcome:</strong> {evidence.status}</p><p>{evidence.sandbox_summary}</p>
+      <p><strong>Evidence ID:</strong> <code>{evidence.evidence_id}</code></p><p><strong>Authorizer:</strong> {evidence.authorizer_identifier} (unverified local-development label) · purpose: {evidence.authorization_purpose}</p>
+      <p><strong>Test command ID:</strong> <code>{evidence.test_command_id}</code> · <strong>Exit code:</strong> {evidence.exit_code ?? "not run"} · <strong>Duration:</strong> {evidence.duration_ms === null ? "not run" : `${evidence.duration_ms} ms`}</p>
+      {evidence.failure_reason && <p><strong>Reason:</strong> {evidence.failure_reason}</p>}
+      {evidence.test_results.length > 0 && <ul>{evidence.test_results.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>}
+      {evidence.stdout && <details><summary>Captured stdout (bounded)</summary><pre>{evidence.stdout}</pre></details>}
+      {evidence.stderr && <details><summary>Captured stderr (bounded)</summary><pre>{evidence.stderr}</pre></details>}
+      <p><strong>Original repository modified:</strong> no · <strong>Patch applied to original:</strong> no</p>
+    </div>}
+    <p className="runtime-not-run"><strong>No host fallback.</strong> If a trusted sandbox is unavailable, the outcome remains <code>sandbox_unavailable</code>; repository tests are never run directly on Windows.</p>
+  </section>;
+}
+
 function HandoffResult({ report, markdownStatus, onCopy, onDownload }: { report: HandoffReport; markdownStatus: string; onCopy: () => void; onDownload: () => void }) {
   return <div className="handoff-result" aria-live="polite">
     <div className="handoff-report-toolbar"><Badge tone="good">Mock handoff · static evidence</Badge><div><button className="button button-dark" type="button" onClick={onCopy}>Copy Markdown</button><button className="button button-primary" type="button" onClick={onDownload}>Download Markdown</button></div></div>
@@ -460,6 +539,10 @@ function HandoffResult({ report, markdownStatus, onCopy, onDownload }: { report:
     <p><strong>Assumptions:</strong> {report.validation_and_risks.assumptions.join("; ") || "None recorded"}</p>
     <p><strong>Unresolved dependencies:</strong> {report.validation_and_risks.unresolved_dependencies.join("; ") || "None recorded"}</p>
     <p><strong>Missing evidence:</strong> {report.validation_and_risks.unsupported_evidence.join("; ") || "None recorded"}</p>
+    <h5>Isolated runtime evidence</h5><p>{report.runtime_execution.sandbox_summary}</p><p><strong>Test case:</strong> {report.runtime_execution.test_case} · <strong>Command ID:</strong> {report.runtime_execution.test_command_id} · <strong>Exit:</strong> {report.runtime_execution.exit_code ?? "not run"} · <strong>Duration:</strong> {report.runtime_execution.duration_ms === null ? "not run" : `${report.runtime_execution.duration_ms} ms`}</p>
+    <p><strong>Evidence ID:</strong> {report.runtime_execution.evidence_id ?? "None"}</p><p><strong>Runtime source hash:</strong> {report.runtime_execution.source_sha256} · <strong>Runtime diff hash:</strong> {report.runtime_execution.diff_sha256}</p>
+    {report.runtime_execution.test_results.length > 0 && <ul>{report.runtime_execution.test_results.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul>}
+    <ul>{report.runtime_execution.remaining_work.map((item) => <li key={item}>{item}</li>)}</ul>
     <h5>Outstanding questions</h5><ul>{report.outstanding_questions.map((question) => <li key={question}>{question}</li>)}</ul>
     <h5>Human decisions</h5>{report.human_decisions.length ? report.human_decisions.map((decision) => <article className="handoff-decision" key={decision.review_id}><strong>{decision.decision.replaceAll("_", " ")}</strong><small>{decision.reviewer_identifier} (unverified local-development label) · {new Date(decision.timestamp).toLocaleString()}</small><p>{decision.justification}</p></article>) : <p>No human decision recorded.</p>}
     <h5>Next engineer actions</h5><ul>{report.next_engineer_actions.map((action, index) => <li key={`${index}-${action.action}`}>{action.action}{action.required_approval ? " (further approval required)" : ""}</li>)}</ul>

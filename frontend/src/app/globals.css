@@ -218,6 +218,7 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .runtime-not-run p { margin: 5px 0 0; color: #887955; font-size: 9px; line-height: 1.5; }
 .proposal-safety { margin: 10px 0 0; color: #87938a; font-size: 8px; }
 .review-panel, .handoff-section { margin-top: 14px; border: 1px solid #e1e8e1; border-radius: 8px; padding: 13px; background: #fff; }
+.runtime-validation-panel { margin-top: 14px; border: 1px solid #e1e8e1; border-radius: 8px; padding: 13px; background: #fffefa; }
 .handoff-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .handoff-title-row .eyebrow { margin-bottom: 4px; }
 .handoff-title-row h4 { margin: 0; color: #2b4337; font-size: 13px; }
@@ -229,6 +230,17 @@ h1, h2, h3, h4, p { margin-top: 0; }
 .review-form label { color: #43574b; font-size: 9px; font-weight: 700; }
 .review-form label span { color: #8b9890; font-size: 8px; font-weight: 400; }
 .review-form input, .review-form textarea { width: 100%; border: 1px solid #dfe7df; border-radius: 6px; padding: 8px 9px; color: #405349; background: #fcfdfa; font: inherit; font-size: 10px; }
+.runtime-authorization-form { display: grid; gap: 7px; margin-top: 12px; }
+.runtime-authorization-form label { color: #43574b; font-size: 9px; font-weight: 700; }
+.runtime-authorization-form input, .runtime-authorization-form textarea { width: 100%; border: 1px solid #dfe7df; border-radius: 6px; padding: 8px 9px; color: #405349; background: #fcfdfa; font: inherit; font-size: 10px; }
+.runtime-authorization-form textarea { min-height: 54px; resize: vertical; }
+.runtime-authorization-form small, .sandbox-limitation { color: #89968d; font-size: 8px; line-height: 1.45; }
+.runtime-validation-panel > p, .runtime-evidence p { margin: 7px 0; color: #718078; font-size: 9px; line-height: 1.5; overflow-wrap: anywhere; }
+.runtime-validation-panel > p code, .runtime-evidence code { overflow-wrap: anywhere; }
+.sandbox-checks, .runtime-evidence ul { margin: 6px 0; padding-left: 17px; color: #718078; font-size: 8px; line-height: 1.5; }
+.sandbox-limitation { display: block; margin: 4px 0; }
+.runtime-evidence { margin-top: 10px; border-top: 1px solid #e9eee8; padding-top: 9px; }
+.runtime-evidence pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 5px; padding: 8px; background: #f5f7f3; font-size: 8px; }
 .review-form textarea { min-height: 62px; resize: vertical; }
 .review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin: 3px 0; }
 .review-actions .button { min-height: 33px; font-size: 9px; }

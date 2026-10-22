@@ -18,6 +18,7 @@ def _service(request: Request) -> HandoffReportService:
         state.proposal_store,
         state.task_plan_store,
         state.review_store,
+        state.runtime_validation_store,
         state.handoff_store,
         state.settings,
     )
