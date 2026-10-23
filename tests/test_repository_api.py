@@ -24,6 +24,7 @@ def test_analysis_api_returns_structured_traceable_data(sample_repository):
     assert body["summary"]["repository_id"] == "sample"
     assert any(item["path"] == "package/core.py" for item in body["modules"])
     assert any(item["source"]["path"] == "package/core.py" for item in body["classes"])
+    assert "snapshot_id" not in body and "content_hashes" not in body
     assert "C:\\" not in response.text
 
 

@@ -71,6 +71,7 @@ const liveTaskPlan = {
 const codeProposal = {
   proposal_id: "2b7a47fb-5c38-481a-a35c-b4f4cc0d7047", repository_id: "planning-fixture",
   originating_task_id: "plan-test", task_description: "Fix the division by zero defect",
+  originating_plan_provider: "nebius", transformation_id: "calculator-zero-denominator-value-error-v1",
   target_files: [{ path: "package/calculator.py", original_sha256: "a".repeat(64), source_reference: { path: "package/calculator.py", line: 1, end_line: 2 } }],
   proposed_change_summary: "Raise ValueError when denominator is zero.",
   unified_diff: "--- a/package/calculator.py\n+++ b/package/calculator.py\n@@ -1,2 +1,4 @@\n def divide(numerator, denominator):\n+    if denominator == 0:\n+        raise ValueError('denominator must not be zero')\n     return numerator / denominator\n",
@@ -86,9 +87,9 @@ const codeProposal = {
 
 const handoffReport = {
   report_id: "550e8400-e29b-41d4-a716-446655440000", generated_at: "2026-10-21T00:00:00Z", repository_id: "planning-fixture",
-  task: { task_id: "plan-test", objective: taskPlan.task_description, current_progress: "A plan and static proposal are available; no review decision has been recorded.", task_status: "planned", proposal_lifecycle_state: "awaiting_review", proposal_version: 1, relevant_files: taskPlan.relevant_files, source_references: taskPlan.source_references, planned_steps: ["1. Inspect division"], planned_validation_requirements: ["Run tests"] },
+  task: { task_id: "plan-test", objective: taskPlan.task_description, current_progress: "A plan and static proposal are available; no review decision has been recorded.", task_status: "planned", planning_provider: "nebius", proposal_lifecycle_state: "awaiting_review", proposal_version: 1, relevant_files: taskPlan.relevant_files, source_references: taskPlan.source_references, planned_steps: ["1. Inspect division"], planned_validation_requirements: ["Run tests"] },
   technical_understanding: { analysis_summary: repositoryAnalysis.summary, relevant_modules: repositoryAnalysis.modules, relevant_functions: ["divide (package/calculator.py:1)"], relevant_classes: [], relevant_imports: [], dependency_manifests: ["requirements.txt: pytest>=8"], verified_context: ["Current static scan found one Python module."], analysis_warnings: [] },
-  proposed_change: { summary: codeProposal.proposed_change_summary, target_files: codeProposal.target_files, diff_sha256: codeProposal.diff_sha256, static_validation_status: "passed", validation_findings: codeProposal.validation_findings, provider: "mock", is_mock: true, source_revision_status: "current" },
+  proposed_change: { summary: codeProposal.proposed_change_summary, target_files: codeProposal.target_files, diff_sha256: codeProposal.diff_sha256, static_validation_status: "passed", validation_findings: codeProposal.validation_findings, provider: "mock", is_mock: true, originating_plan_provider: "nebius", transformation_id: "calculator-zero-denominator-value-error-v1", source_revision_status: "current" },
   human_decisions: [], outstanding_questions: [],
   validation_and_risks: { static_checks: codeProposal.validation_findings, runtime_tests_status: "not_run", runtime_tests_reason: codeProposal.runtime_validation_reason, risks: taskPlan.risks, assumptions: [], unresolved_dependencies: [], unsupported_evidence: [] },
   runtime_execution: { status: "not_run", sandbox_summary: "No trusted sandbox configured.", evidence_id: null, test_case: "calculator_unit_tests", test_command_id: "calculator_pytest_suite_v1", exit_code: null, duration_ms: null, test_results: [], source_sha256: codeProposal.target_files[0].original_sha256, diff_sha256: codeProposal.diff_sha256, remaining_work: ["Configure a trusted sandbox."] },
@@ -188,8 +189,8 @@ describe("DevRelay dashboard", () => {
     expect(screen.getAllByText("package/calculator.py").length).toBeGreaterThan(0);
   });
 
-  it("creates and displays a mock review proposal without apply actions", async () => {
-    const fetchMock = routeFetch({ "api/v1/tasks/plan": taskPlan, "api/v1/proposals/create": jsonResponse(codeProposal, 201) });
+  it("continues a Nemotron plan into the deterministic review proposal without apply actions", async () => {
+    const fetchMock = routeFetch({ "api/v1/tasks/plan": liveTaskPlan, "api/v1/proposals/create": jsonResponse(codeProposal, 201) });
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<Dashboard />);
@@ -202,10 +203,15 @@ describe("DevRelay dashboard", () => {
     expect(screen.getByText("Execution disabled")).toBeInTheDocument();
     expect(screen.getByText(/repository tests are never run directly on Windows/i)).toBeInTheDocument();
     expect(screen.getAllByText("Source SHA-256:", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Plan provider: nebius")).toBeInTheDocument();
+    expect(screen.getByText("Proposal generator: deterministic allowlist")).toBeInTheDocument();
     expect(screen.getByText("Runtime validation: not run")).toBeInTheDocument();
     expect(screen.getByText(/No files were changed, approved, applied, or executed/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /apply|approve/i })).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/backend/api/v1/proposals/create", expect.objectContaining({ method: "POST" }));
+    const proposalRequest = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/v1/proposals/create"));
+    expect(JSON.parse(String(proposalRequest?.[1]?.body))).toMatchObject({
+      transformation_id: "calculator-zero-denominator-value-error-v1",
+    });
   });
 
   it("renders the generated handoff and exposes Markdown export controls", async () => {

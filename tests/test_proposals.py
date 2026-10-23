@@ -4,6 +4,8 @@ These tests parse target source but never import or execute the synthetic reposi
 """
 
 import shutil
+from dataclasses import replace
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,8 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.core.errors import ProposalValidationError
 from app.main import create_app
+from app.models.inference import InferenceResponse
+from app.services.mock_inference import MockModelProvider
 from app.services.proposal_generation import (
     MAX_PATCH_BYTES,
     TARGET_PATH,
@@ -52,7 +56,20 @@ def create_proposal(client: TestClient, task_id: str, repository_id: str = "plan
     return client.post("/api/v1/proposals/create", json={
         "repository_id": repository_id,
         "task_id": task_id,
+        "transformation_id": "calculator-zero-denominator-value-error-v1",
     })
+
+
+async def simulated_nebius(messages, max_tokens=1024, *, disable_thinking=False, json_mode=False, report_model=True, alter_content=None):
+    del disable_thinking
+    assert json_mode is True
+    mocked = await MockModelProvider().complete(messages, max_tokens)
+    content = alter_content if alter_content is not None else mocked.content
+    return InferenceResponse(
+        model="nvidia/Nemotron-3_5-Lightning", content=content,
+        provider="nebius", is_mock=False, completion_status="completed",
+        finish_reason="stop", model_reported_by_provider=report_model, latency_ms=12,
+    )
 
 
 def test_valid_calculator_proposal_is_structured_and_review_only(proposal_client):
@@ -64,6 +81,8 @@ def test_valid_calculator_proposal_is_structured_and_review_only(proposal_client
     proposal = response.json()
     assert proposal["repository_id"] == "planning-fixture"
     assert proposal["originating_task_id"] == plan["task_id"]
+    assert proposal["originating_plan_provider"] == "mock"
+    assert proposal["transformation_id"] == "calculator-zero-denominator-value-error-v1"
     assert proposal["target_files"][0]["path"] == TARGET_PATH
     assert len(proposal["target_files"][0]["original_sha256"]) == 64
     assert "raise ValueError" in proposal["unified_diff"]
@@ -218,3 +237,123 @@ def test_request_validation_retrieval_and_no_apply_endpoint(proposal_client):
     assert retrieved.json() == proposal
     assert client.post(f"/api/v1/proposals/{proposal['proposal_id']}/apply").status_code == 404
     assert client.get("/api/v1/proposals/not-a-uuid").status_code == 422
+
+
+def test_valid_trusted_nebius_plan_can_create_only_the_allowlisted_proposal(tmp_path):
+    root = tmp_path / "synthetic-repository"
+    shutil.copytree(PLANNING_REPO, root)
+    client = TestClient(create_app(Settings(
+        _env_file=None, nebius_api_key=None, inference_provider="nebius",
+        nebius_model="nvidia/Nemotron-3_5-Lightning",
+        authorized_repositories={"planning-fixture": root},
+    )))
+    with client:
+        original_source = (root / TARGET_PATH).read_bytes()
+        client.app.state.inference_service._provider.complete = simulated_nebius
+        plan = create_plan(client)
+        assert plan["provider"] == "nebius" and plan["is_mock"] is False
+        assert plan["human_approval_required"] is True and plan["execution_status"] == "not_started"
+        response = create_proposal(client, plan["task_id"])
+        assert response.status_code == 201, response.text
+        proposal = response.json()
+        assert proposal["originating_plan_provider"] == "nebius"
+        assert proposal["provider"] == "mock" and proposal["is_mock"] is True
+        assert proposal["human_approval_required"] is True
+        assert proposal["runtime_validation_status"] == "not_run"
+        assert proposal["lifecycle_state"] == "awaiting_review"
+        assert (root / TARGET_PATH).read_bytes() == original_source
+
+
+def test_client_cannot_forge_plan_provider_or_validation_metadata(proposal_client):
+    client, _ = proposal_client
+    plan = create_plan(client)
+    response = client.post("/api/v1/proposals/create", json={
+        "repository_id": "planning-fixture", "task_id": plan["task_id"],
+        "transformation_id": "calculator-zero-denominator-value-error-v1",
+        "provider": "nebius", "is_mock": False, "status": "planned",
+        "unsupported_references": [], "source_references_validated": True,
+    })
+    assert response.status_code == 201
+    assert response.json()["originating_plan_provider"] == "mock"
+
+
+def test_modified_server_stored_plan_metadata_fails_integrity_check(proposal_client):
+    client, _ = proposal_client
+    plan = create_plan(client)
+    store = client.app.state.task_plan_store
+    record = store._records[plan["task_id"]]
+    altered_plan = record.plan.model_copy(update={"provider": "nebius", "is_mock": False})
+    store._records[plan["task_id"]] = replace(record, plan=altered_plan)
+    response = create_proposal(client, plan["task_id"])
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "proposal_validation_failed"
+
+
+def test_stale_analysis_snapshot_is_rejected_even_when_calculator_target_is_unchanged(proposal_client):
+    client, root = proposal_client
+    plan = create_plan(client)
+    dependency_file = root / "package/dependencies.py"
+    dependency_file.write_text(dependency_file.read_text(encoding="utf-8") + "\n# changed snapshot\n", encoding="utf-8")
+    response = create_proposal(client, plan["task_id"])
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "proposal_source_stale"
+
+
+def test_unsupported_transformation_is_rejected(proposal_client):
+    client, _ = proposal_client
+    plan = create_plan(client)
+    response = client.post("/api/v1/proposals/create", json={
+        "repository_id": "planning-fixture", "task_id": plan["task_id"],
+        "transformation_id": "arbitrary-model-recommendation",
+    })
+    assert response.status_code == 422
+
+
+def test_plan_with_unsupported_citation_cannot_create_proposal(tmp_path):
+    root = tmp_path / "synthetic-repository"
+    shutil.copytree(PLANNING_REPO, root)
+    client = TestClient(create_app(Settings(
+        _env_file=None, nebius_api_key=None, inference_provider="nebius",
+        nebius_model="nvidia/Nemotron-3_5-Lightning",
+        authorized_repositories={"planning-fixture": root},
+    )))
+
+    async def invalid_evidence(messages, max_tokens=1024, *, disable_thinking=False, json_mode=False):
+        del disable_thinking
+        assert json_mode
+        mocked = await MockModelProvider().complete(messages, max_tokens)
+        content = json.loads(mocked.content)
+        content["source_references"].append({"path": "package/calculator.py", "line": 999})
+        return InferenceResponse(
+            model="nvidia/Nemotron-3_5-Lightning", content=json.dumps(content),
+            provider="nebius", is_mock=False, completion_status="completed",
+            finish_reason="stop", model_reported_by_provider=True,
+        )
+
+    with client:
+        client.app.state.inference_service._provider.complete = invalid_evidence
+        plan = create_plan(client)
+        assert plan["status"] == "insufficient_context"
+        assert plan["unsupported_references"] == ["package/calculator.py:999"]
+        response = create_proposal(client, plan["task_id"])
+        assert response.status_code == 422
+
+
+def test_unverified_nebius_model_identity_is_rejected_before_plan_storage(tmp_path):
+    root = tmp_path / "synthetic-repository"
+    shutil.copytree(PLANNING_REPO, root)
+    client = TestClient(create_app(Settings(
+        _env_file=None, nebius_api_key=None, inference_provider="nebius",
+        nebius_model="nvidia/Nemotron-3_5-Lightning",
+        authorized_repositories={"planning-fixture": root},
+    )))
+    with client:
+        async def unverified(messages, max_tokens=1024, *, disable_thinking=False, json_mode=False):
+            return await simulated_nebius(messages, max_tokens, disable_thinking=disable_thinking,
+                                          json_mode=json_mode, report_model=False)
+        client.app.state.inference_service._provider.complete = unverified
+        response = client.post("/api/v1/tasks/plan", json={
+            "repository_id": "planning-fixture", "task_description": TASK,
+        })
+        assert response.status_code == 502
+        assert response.json()["error"]["code"] == "model_provider_error"

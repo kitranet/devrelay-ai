@@ -46,6 +46,7 @@ def make_proposal(client: TestClient) -> dict:
     assert plan_response.status_code == 200
     proposal_response = client.post("/api/v1/proposals/create", json={
         "repository_id": "planning-fixture", "task_id": plan_response.json()["task_id"],
+        "transformation_id": "calculator-zero-denominator-value-error-v1",
     })
     assert proposal_response.status_code == 201
     return proposal_response.json()
@@ -354,8 +355,11 @@ def test_handoff_is_traceable_mock_labeled_and_never_claims_runtime_tests(local_
     assert generated.status_code == 201
     report = generated.json()
     assert report["provider"] == "mock" and report["is_mock"] is True
+    assert report["task"]["planning_provider"] == "mock"
     assert report["task"]["proposal_lifecycle_state"] == "review_approved"
     assert report["proposed_change"]["target_files"][0]["path"] == TARGET_PATH
+    assert report["proposed_change"]["originating_plan_provider"] == "mock"
+    assert report["proposed_change"]["transformation_id"] == "calculator-zero-denominator-value-error-v1"
     assert report["proposed_change"]["source_revision_status"] == "current"
     assert report["technical_understanding"]["relevant_functions"]
     assert report["human_decisions"][0]["reviewer_identity_status"] == "unverified_local_development"

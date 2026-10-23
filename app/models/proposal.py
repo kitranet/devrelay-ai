@@ -12,6 +12,7 @@ from app.models.repository import SourceReference
 class CreateProposalRequest(BaseModel):
     repository_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     task_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    transformation_id: Literal["calculator-zero-denominator-value-error-v1"]
 
 
 class ProposalTargetFile(BaseModel):
@@ -38,6 +39,8 @@ class CodeChangeProposal(BaseModel):
     proposal_id: UUID
     repository_id: str
     originating_task_id: str
+    originating_plan_provider: Literal["nebius", "mock"]
+    transformation_id: Literal["calculator-zero-denominator-value-error-v1"]
     task_description: str = Field(min_length=1, max_length=4_000)
     target_files: list[ProposalTargetFile] = Field(min_length=1, max_length=5)
     proposed_change_summary: str = Field(min_length=1, max_length=1_000)

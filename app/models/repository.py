@@ -91,3 +91,7 @@ class RepositoryAnalysisResponse(BaseModel):
     readme_files: list[str]
     configuration_files: list[str]
     warnings: list[AnalysisWarning]
+    # Internal identity and content hashes used to bind plans to the scan that
+    # produced their evidence. Pydantic excludes these fields from API output.
+    snapshot_id: str = Field(exclude=True, repr=False)
+    content_hashes: dict[str, str] = Field(exclude=True, repr=False)

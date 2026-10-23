@@ -373,7 +373,7 @@ export default function Dashboard() {
             {!plan && !planningBusy && <EmptyState title="A plan you can inspect" detail="Plans include proposed steps, source evidence, risks and tests. Nothing is changed or executed." />}
             {planningBusy && <div className="loading-block" role="status"><span className="spinner spinner-large" /><span>Preparing repository context…</span></div>}
             {plan && <PlanResult plan={plan} />}
-            {plan?.status === "planned" && plan.is_mock && /division by zero/i.test(plan.task_description) && !proposal && <div className="proposal-action"><p>This fixed mock scenario can produce a review-only patch. The source file will remain unchanged.</p><button className="button button-primary" type="button" onClick={generateProposal} disabled={proposalBusy || backend !== "connected"}>{proposalBusy ? <><span className="spinner" /> Preparing proposal</> : <>Generate code proposal <span aria-hidden="true">→</span></>}</button></div>}
+            {plan?.status === "planned" && plan.unsupported_references.length === 0 && /division by zero/i.test(plan.task_description) && !proposal && <div className="proposal-action"><p>The server verifies the plan and current analysis snapshot, then creates only the fixed calculator transformation. The source file remains unchanged. The diff is deterministic; the planning provider is shown separately.</p><button className="button button-primary" type="button" onClick={generateProposal} disabled={proposalBusy || backend !== "connected"}>{proposalBusy ? <><span className="spinner" /> Preparing proposal</> : <>Generate code proposal <span aria-hidden="true">→</span></>}</button></div>}
             {proposal && <ProposalResult proposal={proposal} />}
             {proposal && <ReviewPanel proposal={proposal} status={reviewStatus} history={reviewHistory} reviewerIdentifier={reviewerIdentifier} setReviewerIdentifier={setReviewerIdentifier} justification={reviewJustification} setJustification={setReviewJustification} outstandingQuestions={outstandingQuestions} setOutstandingQuestions={setOutstandingQuestions} busy={reviewBusy} onDecision={recordReview} />}
             {proposal && <RuntimeValidationPanel proposal={proposal} readiness={sandboxReadiness} evidence={runtimeEvidence} authorizer={executionAuthorizer} setAuthorizer={setExecutionAuthorizer} purpose={executionPurpose} setPurpose={setExecutionPurpose} busy={runtimeBusy} onRequest={requestRuntimeRun} />}
@@ -432,7 +432,7 @@ function ProposalResult({ proposal }: { proposal: CodeChangeProposal }) {
     <div className="proposal-heading"><div><p className="eyebrow">REVIEW ONLY · {proposal.lifecycle_state.replaceAll("_", " ")}</p><h4 id="proposal-title">Code change proposal</h4></div><Badge tone="good">Static checks passed</Badge></div>
     <p className="proposal-task"><strong>Task:</strong> {proposal.task_description}</p>
     <p className="proposal-summary">{proposal.proposed_change_summary}</p>
-    <div className="proposal-meta"><span>Provider: mock</span><span>Risk: {proposal.risk_classification}</span><span>Human approval required</span></div>
+    <div className="proposal-meta"><span>Plan provider: {proposal.originating_plan_provider}</span><span>Proposal generator: deterministic allowlist</span><span>Transformation: {proposal.transformation_id}</span><span>Risk: {proposal.risk_classification}</span><span>Human approval required</span></div>
     {proposal.target_files.map((file) => <div className="proposal-target" key={file.path}><strong>Target</strong><code>{file.path}:{file.source_reference.line}</code><small>Source SHA-256: <code>{file.original_sha256}</code></small></div>)}
     <div className="proposal-findings"><h5>Static validation findings</h5><ul>{proposal.validation_findings.map((finding) => <li key={finding.check}><Badge tone={finding.status === "passed" ? "good" : "muted"}>{finding.status}</Badge><span>{finding.detail}</span></li>)}</ul></div>
     <h5>Unified diff</h5><pre className="proposal-diff"><code>{proposal.unified_diff}</code></pre>
@@ -527,9 +527,9 @@ function RuntimeValidationPanel({ proposal, readiness, evidence, authorizer, set
 
 function HandoffResult({ report, markdownStatus, onCopy, onDownload }: { report: HandoffReport; markdownStatus: string; onCopy: () => void; onDownload: () => void }) {
   return <div className="handoff-result" aria-live="polite">
-    <div className="handoff-report-toolbar"><Badge tone="good">Mock handoff · static evidence</Badge><div><button className="button button-dark" type="button" onClick={onCopy}>Copy Markdown</button><button className="button button-primary" type="button" onClick={onDownload}>Download Markdown</button></div></div>
+    <div className="handoff-report-toolbar"><Badge tone="good">Deterministic handoff · {report.task.planning_provider} plan</Badge><div><button className="button button-dark" type="button" onClick={onCopy}>Copy Markdown</button><button className="button button-primary" type="button" onClick={onDownload}>Download Markdown</button></div></div>
     {markdownStatus && <p className="markdown-status" role="status">{markdownStatus}</p>}
-    <h5>Project and task context</h5><p>{report.task.objective}</p><p>{report.task.current_progress}</p>
+    <h5>Project and task context</h5><p>{report.task.objective}</p><p>Planning provider: {report.task.planning_provider}. The proposal itself is generated by the fixed deterministic allowlist.</p><p>{report.task.current_progress}</p>
     <h5>Verified technical context</h5><ul>{report.technical_understanding.verified_context.map((item) => <li key={item}>{item}</li>)}</ul>
     <p><strong>Relevant files:</strong> {report.task.relevant_files.join(", ")}</p>
     <h5>Planned implementation steps</h5>{report.task.planned_steps.length ? <ol>{report.task.planned_steps.map((step, index) => <li key={`${index}-${step}`}>{step.replace(/^\d+\.\s*/, "")}</li>)}</ol> : <p>None recorded</p>}
@@ -540,7 +540,7 @@ function HandoffResult({ report, markdownStatus, onCopy, onDownload }: { report:
     <p><strong>Imports:</strong> {report.technical_understanding.relevant_imports.join("; ") || "None found"}</p>
     <p><strong>Dependency manifests:</strong> {report.technical_understanding.dependency_manifests.join("; ") || "None found"}</p>
     {report.technical_understanding.analysis_warnings.length > 0 && <><h5>Analysis warnings</h5><ul>{report.technical_understanding.analysis_warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul></>}
-    <h5>Proposed change</h5><p>{report.proposed_change.summary}</p><p><strong>Source revision:</strong> {report.proposed_change.source_revision_status}</p>
+    <h5>Proposed change</h5><p>{report.proposed_change.summary}</p><p><strong>Originating plan provider:</strong> {report.proposed_change.originating_plan_provider} · <strong>Allowlisted transformation:</strong> {report.proposed_change.transformation_id}</p><p><strong>Source revision:</strong> {report.proposed_change.source_revision_status}</p>
     <ul>{report.proposed_change.target_files.map((target) => <li key={target.path}>{target.path}:{target.source_reference.line} · SHA-256 {target.original_sha256}</li>)}</ul>
     <p><strong>Diff SHA-256:</strong> {report.proposed_change.diff_sha256}</p>
     <h5>Validation</h5><p><strong>Static checks</strong></p><ul>{report.validation_and_risks.static_checks.length ? report.validation_and_risks.static_checks.map((finding) => <li key={finding.check}>{finding.check}: {finding.status} — {finding.detail}</li>) : <li>None recorded</li>}</ul>

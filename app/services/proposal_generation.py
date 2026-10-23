@@ -38,6 +38,9 @@ from app.services.repository_analysis import RepositoryScanner
 logger = logging.getLogger(__name__)
 
 TARGET_PATH = "package/calculator.py"
+AUTHORIZED_REPOSITORY_ID = "planning-fixture"
+AUTHORIZED_TASK = "fix the division by zero defect in the calculator"
+AUTHORIZED_TRANSFORMATION = "calculator-zero-denominator-value-error-v1"
 MAX_SOURCE_BYTES = 256_000
 MAX_PATCH_BYTES = 16_384
 MAX_CHANGED_LINES = 80
@@ -225,17 +228,6 @@ def _read_authorized_source(settings: Settings, repository_id: str, relative_pat
     return candidate, content
 
 
-def capture_plan_source_hashes(settings: Settings, plan: TaskPlan) -> dict[str, str]:
-    """Capture the supported target's revision when a planned task is registered."""
-    if plan.status != "planned" or TARGET_PATH not in plan.relevant_files:
-        return {}
-    try:
-        _, content = _read_authorized_source(settings, plan.repository_id, TARGET_PATH)
-    except (ProposalValidationError, ProposalSourceConflictError, RepositoryNotAuthorizedError):
-        return {}
-    return {TARGET_PATH: hashlib.sha256(content).hexdigest()}
-
-
 class ProposalGenerationService:
     def __init__(
         self,
@@ -254,13 +246,27 @@ class ProposalGenerationService:
         if stored is None:
             raise TaskPlanNotFoundError()
         plan = stored.plan
+        if stored.plan_digest != self.task_store.digest_plan(plan):
+            raise ProposalValidationError("The stored plan integrity check failed.")
+        if (
+            stored.validated_provider != plan.provider
+            or stored.validated_is_mock != plan.is_mock
+            or stored.analysis_snapshot_id == ""
+            or not self._provider_provenance_is_valid(stored, plan, self.settings.nebius_model)
+            or self.settings.inference_provider != plan.provider
+        ):
+            raise ProposalValidationError("The stored plan provenance could not be verified.")
         if plan.repository_id != request.repository_id:
             raise RepositoryNotAuthorizedError()
+        if request.repository_id != AUTHORIZED_REPOSITORY_ID:
+            raise RepositoryNotAuthorizedError()
+        if request.transformation_id != AUTHORIZED_TRANSFORMATION:
+            raise ProposalValidationError("The requested transformation is not allowlisted.")
         if plan.status != "planned" or not plan.human_approval_required or plan.execution_status != "not_started":
             raise ProposalValidationError("Only a valid, unstarted engineering plan can receive a proposal.")
-        if plan.provider != "mock" or not plan.is_mock:
-            raise ProposalValidationError("Only the deterministic mock calculator scenario is supported.")
-        if "division by zero" not in plan.task_description.lower():
+        if plan.unsupported_references:
+            raise ProposalValidationError("A plan with unsupported evidence cannot receive a proposal.")
+        if " ".join(plan.task_description.casefold().split()) != AUTHORIZED_TASK:
             raise ProposalValidationError("This task is outside the predefined calculator proposal scenario.")
         if TARGET_PATH not in plan.relevant_files or not any(change.path == TARGET_PATH for change in plan.expected_code_changes):
             raise ProposalValidationError("The plan does not authorize the predefined calculator target.")
@@ -271,8 +277,14 @@ class ProposalGenerationService:
         # Re-scan at proposal time. This revalidates repository authorization and that the
         # target remains within the scanner's bounded, non-symlink source inventory.
         analysis = self.scanner.analyze(request.repository_id)
+        target_metadata = next((item for item in analysis.files if item.path == TARGET_PATH), None)
+        if target_metadata is not None and target_metadata.size_bytes > MAX_SOURCE_BYTES:
+            raise ProposalValidationError("The authorized target exceeds the proposal source-size limit.")
+        if analysis.snapshot_id != stored.analysis_snapshot_id:
+            raise ProposalSourceConflictError()
         if TARGET_PATH not in {item.path for item in analysis.files}:
             raise ProposalValidationError("The target file is no longer in the authorized source inventory.")
+        self._validate_plan_evidence(plan, analysis)
 
         _, original_bytes = _read_authorized_source(self.settings, request.repository_id, TARGET_PATH)
         original_hash = hashlib.sha256(original_bytes).hexdigest()
@@ -309,6 +321,8 @@ class ProposalGenerationService:
             proposal_id=uuid4(),
             repository_id=request.repository_id,
             originating_task_id=plan.task_id,
+            originating_plan_provider=plan.provider,
+            transformation_id=request.transformation_id,
             task_description=plan.task_description,
             target_files=[ProposalTargetFile(
                 path=TARGET_PATH,
@@ -339,6 +353,50 @@ class ProposalGenerationService:
         )
         self.proposal_store.put(proposal)
         return proposal
+
+    @staticmethod
+    def _provider_provenance_is_valid(stored, plan: TaskPlan, configured_model: str) -> bool:
+        diagnostics = plan.inference_diagnostics
+        if diagnostics is None or diagnostics.provider != plan.provider or diagnostics.is_mock != plan.is_mock:
+            return False
+        if stored.validated_model != diagnostics.model or not stored.provider_model_verified:
+            return False
+        if diagnostics.completion_status != "completed" or diagnostics.finish_reason not in {"stop", "mock_complete"}:
+            return False
+        if plan.provider == "mock":
+            return plan.is_mock and diagnostics.model == "devrelay-mock-v1" and diagnostics.finish_reason == "mock_complete"
+        return (
+            plan.provider == "nebius"
+            and not plan.is_mock
+            and diagnostics.model == stored.validated_model == configured_model
+            and diagnostics.finish_reason == "stop"
+        )
+
+    @staticmethod
+    def _validate_plan_evidence(plan: TaskPlan, analysis) -> None:
+        paths = {item.path for item in analysis.files}
+        if any(path not in paths for path in plan.relevant_files):
+            raise ProposalValidationError("The plan contains a file outside the current analysis snapshot.")
+        references = {
+            (item.source.path, item.source.line, item.source.end_line)
+            for item in analysis.functions + analysis.classes
+        }
+        references.update((item.source_path, item.line, None) for item in analysis.imports)
+        starts = {(path, line) for path, line, _ in references}
+
+        def valid(reference) -> bool:
+            key = (reference.path, reference.line, reference.end_line)
+            return key in references if reference.end_line is not None else key in references or key[:2] in starts
+
+        plan_references = list(plan.source_references)
+        for step in plan.implementation_steps:
+            plan_references.extend(step.source_references)
+        if not plan_references or any(not valid(reference) for reference in plan_references):
+            raise ProposalValidationError("The plan contains evidence that is not present in the current analysis snapshot.")
+        if not any(reference.path == TARGET_PATH and valid(reference) for reference in plan.source_references):
+            raise ProposalValidationError("The plan has no verified calculator source reference.")
+        if any(change.path not in paths for change in plan.expected_code_changes):
+            raise ProposalValidationError("The plan proposes a path outside the current analysis snapshot.")
 
     def get(self, proposal_id):
         proposal = self.proposal_store.get(proposal_id)

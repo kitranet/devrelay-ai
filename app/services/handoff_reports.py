@@ -126,6 +126,7 @@ class HandoffReportService:
                     if history else "A plan and static proposal are available; no review decision has been recorded."
                 ),
                 task_status=plan.status,
+                planning_provider=plan.provider,
                 proposal_lifecycle_state=proposal.lifecycle_state,
                 proposal_version=proposal.version,
                 relevant_files=plan.relevant_files,
@@ -154,6 +155,8 @@ class HandoffReportService:
                 validation_findings=proposal.validation_findings,
                 provider="mock",
                 is_mock=True,
+                originating_plan_provider=plan.provider,
+                transformation_id=proposal.transformation_id,
                 source_revision_status="current" if current_revision else "stale",
             ),
             human_decisions=history,
@@ -182,8 +185,9 @@ class HandoffReportService:
             ),
             next_engineer_actions=actions,
             provenance_note=(
-                "Repository facts are from static analysis; task plans and proposals are deterministic mock output; "
-                "reviewer identifiers are unverified local-development labels. No code was changed or executed."
+                f"Repository facts are from static analysis; the originating plan provider was {plan.provider}; "
+                "the proposal diff is the fixed deterministic allowlisted transformation; reviewer identifiers "
+                "are unverified local-development labels. No code was changed or executed."
             ),
             provider="mock",
             is_mock=True,

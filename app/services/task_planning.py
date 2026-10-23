@@ -7,11 +7,12 @@ import json
 import logging
 import re
 import uuid
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
 from app.core.config import Settings
-from app.core.errors import ModelEmptyResponseError, ModelIncompleteResponseError, SensitiveInferenceContentError, TaskPlanValidationError, TaskPlanningContextLimitError, TaskPlanningTimeoutError
+from app.core.errors import ModelEmptyResponseError, ModelIncompleteResponseError, ModelProviderError, SensitiveInferenceContentError, TaskPlanValidationError, TaskPlanningContextLimitError, TaskPlanningTimeoutError
 from app.models.inference import ChatMessage, InferenceRequest, InferenceResponse, diagnostics_for
 from app.models.repository import RepositoryAnalysisResponse, SourceReference
 from app.models.task import PlanGeneration, PlanStep, TaskPlan, TaskPlanningRequest
@@ -56,6 +57,23 @@ _PLAN_ARRAY_PATHS = {
     "risks", "dependencies", "validation_requirements", "assumptions",
     "implementation_steps[].source_references",
 }
+
+
+@dataclass(frozen=True)
+class ValidatedPlanResult:
+    """Plan plus server-only provenance from the exact analysis pass used to validate it."""
+
+    plan: TaskPlan
+    analysis_snapshot_id: str
+    source_hashes: dict[str, str]
+
+
+def _validated_result(plan: TaskPlan, analysis: RepositoryAnalysisResponse) -> ValidatedPlanResult:
+    hashes = {}
+    target_hash = analysis.content_hashes.get("package/calculator.py")
+    if plan.status == "planned" and target_hash and "package/calculator.py" in plan.relevant_files:
+        hashes["package/calculator.py"] = target_hash
+    return ValidatedPlanResult(plan, analysis.snapshot_id, hashes)
 
 
 def _contains_sensitive_text(value: str, configured_key: str | None) -> bool:
@@ -121,24 +139,28 @@ class TaskPlanningService:
         self.inference = inference
 
     async def plan(self, request: TaskPlanningRequest) -> TaskPlan:
+        """Compatibility wrapper returning only the public plan model."""
+        return (await self.plan_with_provenance(request)).plan
+
+    async def plan_with_provenance(self, request: TaskPlanningRequest) -> ValidatedPlanResult:
         try:
             analysis = await asyncio.to_thread(self.scanner.analyze, request.repository_id)
             if any(pattern.search(request.task_description) for pattern in _UNSAFE_TASK_PATTERNS):
-                return TaskPlan(
+                return _validated_result(TaskPlan(
                     task_id=str(uuid.uuid4()), repository_id=request.repository_id,
                     task_description=request.task_description, status="unsupported",
                     human_approval_required=True, provider=self.settings.inference_provider,
                     is_mock=self.settings.inference_provider == "mock",
                     assumptions=["The request falls outside the supported engineering-planning scope."],
-                )
+                ), analysis)
             if not analysis.modules:
-                return TaskPlan(
+                return _validated_result(TaskPlan(
                     task_id=str(uuid.uuid4()), repository_id=request.repository_id,
                     task_description=request.task_description, status="insufficient_context",
                     human_approval_required=True, provider=self.settings.inference_provider,
                     is_mock=self.settings.inference_provider == "mock",
                     assumptions=["No analyzable Python modules were found in this repository."],
-                )
+                ), analysis)
             configured_key = self.settings.nebius_api_key.get_secret_value() if self.settings.nebius_api_key else None
             if _contains_sensitive_text(request.task_description, configured_key):
                 raise SensitiveInferenceContentError()
@@ -193,6 +215,11 @@ class TaskPlanningService:
         except asyncio.TimeoutError as exc:
             raise TaskPlanningTimeoutError() from exc
         configured_key = self.settings.nebius_api_key.get_secret_value() if self.settings.nebius_api_key else None
+        if (
+            inference.provider != self.settings.inference_provider
+            or inference.is_mock != (self.settings.inference_provider == "mock")
+        ):
+            raise ModelProviderError("Inference provider metadata did not match the configured provider.")
         if _contains_sensitive_text(inference.content, configured_key):
             raise SensitiveInferenceContentError()
         if inference.completion_status != "completed":
@@ -227,15 +254,20 @@ class TaskPlanningService:
             raise TaskPlanValidationError() from None
 
         if generation.status == "unsupported":
-            return TaskPlan(
+            return _validated_result(TaskPlan(
                 task_id=str(uuid.uuid4()), repository_id=request.repository_id,
                 task_description=request.task_description, status="unsupported",
                 human_approval_required=True, provider=inference.provider, is_mock=inference.is_mock,
                 assumptions=["The configured provider does not have a defined response for this request."],
                 inference_diagnostics=diagnostics_for(inference),
-            )
+            ), analysis)
 
-        return self._validate_evidence(generation, request, analysis, inference)
+        if inference.provider == "nebius" and (
+            inference.model != self.settings.nebius_model or not inference.model_reported_by_provider
+        ):
+            raise ModelProviderError("Nebius model identity could not be verified against the configured model.")
+
+        return _validated_result(self._validate_evidence(generation, request, analysis, inference), analysis)
 
     def _context(self, task_description: str, analysis: RepositoryAnalysisResponse, budget: int | None = None) -> dict:
         tokens = {word for word in _WORD.findall(task_description.lower()) if word not in _STOP_WORDS}

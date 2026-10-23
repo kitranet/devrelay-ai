@@ -17,6 +17,7 @@ class HandoffTaskContext(BaseModel):
     objective: str
     current_progress: str
     task_status: str
+    planning_provider: Literal["nebius", "mock"]
     proposal_lifecycle_state: str
     proposal_version: int
     relevant_files: list[str]
@@ -48,6 +49,8 @@ class HandoffProposedChange(BaseModel):
     validation_findings: list[ProposalValidationFinding]
     provider: Literal["mock"]
     is_mock: Literal[True]
+    originating_plan_provider: Literal["nebius", "mock"]
+    transformation_id: Literal["calculator-zero-denominator-value-error-v1"]
     source_revision_status: Literal["current", "stale"]
 
 

@@ -86,6 +86,18 @@ def test_valid_repository_analysis_extracts_traceable_structure(sample_repositor
     assert all(not Path(item.path).is_absolute() for item in result.files)
 
 
+def test_analysis_snapshot_hashes_all_included_file_contents_and_are_not_public(sample_repository):
+    scanner = make_scanner(sample_repository)
+    first = scanner.analyze("sample")
+    assert scanner.analyze("sample").snapshot_id == first.snapshot_id
+    assert "snapshot_id" not in first.model_dump()
+    assert "content_hashes" not in first.model_dump()
+    target = sample_repository / "package" / "core.py"
+    original = target.read_text(encoding="utf-8")
+    target.write_text(original + "\n# snapshot change\n", encoding="utf-8")
+    assert scanner.analyze("sample").snapshot_id != first.snapshot_id
+
+
 def test_sensitive_files_are_never_opened(sample_repository, monkeypatch):
     original_open = Path.open
 

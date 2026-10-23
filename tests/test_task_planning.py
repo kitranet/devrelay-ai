@@ -378,10 +378,16 @@ def test_planner_uses_compact_json_instructions_and_gates_optional_thinking_cont
     class InspectProvider:
         def __init__(self):
             self.calls = []
+            self.model = "nvidia/Nemotron-3_5-Lightning"
 
         async def complete(self, messages, max_tokens=1024, *, disable_thinking=False, json_mode=False):
             self.calls.append((messages, max_tokens, disable_thinking, json_mode))
-            return await MockModelProvider().complete(messages, max_tokens)
+            mocked = await MockModelProvider().complete(messages, max_tokens)
+            return mocked.model_copy(update={
+                "model": self.model,
+                "provider": "nebius", "is_mock": False,
+                "model_reported_by_provider": True, "finish_reason": "stop",
+            })
 
     with make_client(tmp_path, provider="nebius", nebius_planning_disable_thinking=True) as client:
         provider = InspectProvider()
@@ -407,12 +413,14 @@ def test_planner_uses_compact_json_instructions_and_gates_optional_thinking_cont
             assert required in system_prompt
 
         client.app.state.settings.nebius_model = "nvidia/other-model"
+        provider.model = "nvidia/other-model"
         response = client.post("/api/v1/tasks/plan", json=payload)
         assert response.status_code == 200
         assert provider.calls[-1][2:] == (False, False)
 
         client.app.state.settings.inference_provider = "mock"
         client.app.state.settings.nebius_model = "nvidia/Nemotron-3_5-Lightning"
+        client.app.state.inference_service._provider = MockModelProvider()
         response = client.post("/api/v1/tasks/plan", json=payload)
         assert response.status_code == 200
         assert provider.calls[-1][2:] == (False, False)

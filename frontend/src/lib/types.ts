@@ -81,6 +81,8 @@ export type CodeChangeProposal = {
   proposal_id: string;
   repository_id: string;
   originating_task_id: string;
+  originating_plan_provider: "nebius" | "mock";
+  transformation_id: "calculator-zero-denominator-value-error-v1";
   task_description: string;
   target_files: { path: string; original_sha256: string; source_reference: SourceReference }[];
   proposed_change_summary: string;
@@ -197,6 +199,7 @@ export type HandoffReport = {
   repository_id: string;
   task: {
     task_id: string; objective: string; current_progress: string; task_status: string;
+    planning_provider: "nebius" | "mock";
     proposal_lifecycle_state: string; proposal_version: number; relevant_files: string[]; source_references: SourceReference[];
     planned_steps: string[]; planned_validation_requirements: string[];
   };
@@ -211,6 +214,8 @@ export type HandoffReport = {
     static_validation_status: "passed" | "failed";
     validation_findings: CodeChangeProposal["validation_findings"];
     provider: "mock"; is_mock: true; source_revision_status: "current" | "stale";
+    originating_plan_provider: "nebius" | "mock";
+    transformation_id: "calculator-zero-denominator-value-error-v1";
   };
   human_decisions: ReviewRecord[];
   outstanding_questions: string[];

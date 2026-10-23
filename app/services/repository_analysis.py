@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import ast
-import configparser
+import hashlib
 import json
+import configparser
 import os
 import re
 import time
@@ -203,6 +204,7 @@ class RepositoryScanner:
         readme_files: list[str] = []
         configuration_files: list[str] = []
         warnings: list[AnalysisWarning] = []
+        content_hashes: dict[str, str] = {}
         total_bytes = 0
         scanned_file_count = 0
         pending_directories: list[tuple[Path, int]] = [(root, 0)]
@@ -254,7 +256,11 @@ class RepositoryScanner:
                         if not resolved.is_relative_to(root):
                             warn("path_escape_skipped", "A path resolving outside the repository was skipped.", relative_text)
                             continue
-                        stat = entry.stat(follow_symlinks=False)
+                        # Use the resolved path's metadata consistently: Windows
+                        # scandir may report st_ino=0 while Path.stat reports the
+                        # actual file index, so comparing those values falsely
+                        # classifies every file as changing during analysis.
+                        stat = resolved.stat()
                     except (OSError, RuntimeError):
                         warn("unreadable_file", "A file could not be inspected.", relative_text)
                         continue
@@ -273,17 +279,38 @@ class RepositoryScanner:
                     if relative.suffix.lower() in _BINARY_SUFFIXES:
                         continue
                     try:
+                        digest = hashlib.sha256()
+                        has_nul = False
+                        actual_size = 0
+                        prefix = bytearray()
                         with resolved.open("rb") as stream:
-                            prefix = stream.read(min(8_192, self.settings.repository_max_file_size_bytes + 1))
+                            while chunk := stream.read(64 * 1024):
+                                check_time()
+                                actual_size += len(chunk)
+                                if actual_size > self.settings.repository_max_file_size_bytes:
+                                    raise RepositoryLimitError("A repository file exceeds the configured file-size limit.")
+                                digest.update(chunk)
+                                has_nul = has_nul or b"\x00" in chunk
+                                if len(prefix) < 8_192:
+                                    prefix.extend(chunk[: 8_192 - len(prefix)])
+                        after = resolved.stat()
+                        if (
+                            actual_size != stat.st_size
+                            or (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+                            != (after.st_ino, after.st_size, after.st_mtime_ns)
+                        ):
+                            warn("file_changed_during_analysis", "A file changed while it was being analyzed.", relative_text)
+                            continue
                     except OSError:
                         warn("unreadable_file", "A file could not be inspected.", relative_text)
                         continue
-                    if b"\x00" in prefix:
+                    if has_nul:
                         continue
                     try:
                         prefix.decode("utf-8")
                     except UnicodeError:
                         continue
+                    content_hashes[relative_text] = digest.hexdigest()
 
                     category = self._category(relative)
                     file_info = RepositoryFile(
@@ -356,6 +383,10 @@ class RepositoryScanner:
         check_time()
         duration_ms = round((self._clock() - started) * 1_000, 3)
         dependency_count = sum(len(manifest.dependencies) for manifest in manifests)
+        snapshot_payload = json.dumps(
+            sorted(content_hashes.items()), ensure_ascii=True, separators=(",", ":")
+        ).encode("ascii")
+        snapshot_id = hashlib.sha256(snapshot_payload).hexdigest()
         summary = RepositorySummary(
             repository_id=repository_id,
             file_count=len(files),
@@ -380,6 +411,8 @@ class RepositoryScanner:
             readme_files=sorted(readme_files),
             configuration_files=sorted(configuration_files),
             warnings=sorted(warnings, key=lambda item: (item.path or "", item.line or 0, item.code)),
+            snapshot_id=snapshot_id,
+            content_hashes=content_hashes,
         )
 
     @staticmethod

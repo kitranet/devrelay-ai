@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+import hashlib
 from threading import RLock
 from uuid import UUID
 
@@ -19,6 +20,12 @@ from app.core.errors import ProposalNotFoundError, ProposalVersionConflictError,
 class StoredTaskPlan:
     plan: TaskPlan
     source_hashes: dict[str, str]
+    analysis_snapshot_id: str
+    plan_digest: str
+    validated_provider: str
+    validated_is_mock: bool
+    validated_model: str | None
+    provider_model_verified: bool
 
 
 class InMemoryTaskPlanStore:
@@ -29,8 +36,24 @@ class InMemoryTaskPlanStore:
         self._records: OrderedDict[str, StoredTaskPlan] = OrderedDict()
         self._lock = RLock()
 
-    def put(self, plan: TaskPlan, source_hashes: dict[str, str] | None = None) -> None:
-        record = StoredTaskPlan(plan=plan.model_copy(deep=True), source_hashes=dict(source_hashes or {}))
+    def put_validated(
+        self,
+        plan: TaskPlan,
+        *,
+        source_hashes: dict[str, str],
+        analysis_snapshot_id: str,
+    ) -> None:
+        diagnostics = plan.inference_diagnostics
+        record = StoredTaskPlan(
+            plan=plan.model_copy(deep=True),
+            source_hashes=dict(source_hashes),
+            analysis_snapshot_id=analysis_snapshot_id,
+            plan_digest=self.digest_plan(plan),
+            validated_provider=plan.provider,
+            validated_is_mock=plan.is_mock,
+            validated_model=diagnostics.model if diagnostics else None,
+            provider_model_verified=bool(diagnostics and diagnostics.model_reported_by_provider),
+        )
         with self._lock:
             self._records[plan.task_id] = record
             self._records.move_to_end(plan.task_id)
@@ -46,7 +69,17 @@ class InMemoryTaskPlanStore:
             return StoredTaskPlan(
                 plan=record.plan.model_copy(deep=True),
                 source_hashes=dict(record.source_hashes),
+                analysis_snapshot_id=record.analysis_snapshot_id,
+                plan_digest=record.plan_digest,
+                validated_provider=record.validated_provider,
+                validated_is_mock=record.validated_is_mock,
+                validated_model=record.validated_model,
+                provider_model_verified=record.provider_model_verified,
             )
+
+    @staticmethod
+    def digest_plan(plan: TaskPlan) -> str:
+        return hashlib.sha256(plan.model_dump_json().encode("utf-8")).hexdigest()
 
 
 class InMemoryProposalStore:

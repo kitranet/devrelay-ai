@@ -89,10 +89,10 @@ Use the returned `task_id` to create a static proposal:
 ```powershell
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/api/v1/proposals/create `
   -ContentType 'application/json' `
-  -Body '{"repository_id":"planning-fixture","task_id":"<task_id from plan response>"}'
+  -Body '{"repository_id":"planning-fixture","task_id":"<task_id from plan response>","transformation_id":"calculator-zero-denominator-value-error-v1"}'
 ```
 
-The response contains the unified diff, target path and source hash, static findings, `provider=mock`, `is_mock=true`, `lifecycle_state=awaiting_review`, and `human_approval_required=true`. Retrieve a proposal with `GET /api/v1/proposals/{proposal_id}`. The source file remains unchanged. No approval or apply route exists. Runtime validation is explicitly `not_run`; the host does not execute repository tests or code. The optional isolated-runtime protocol is not backed by a sandbox implementation. The dashboard exposes the generate button only for this predefined mock plan and displays the diff, findings, hash, and runtime status.
+The response contains the originating plan provider, deterministic transformation ID, unified diff, target path and source hash, static findings, `provider=mock`, `is_mock=true`, `lifecycle_state=awaiting_review`, and `human_approval_required=true`. Both mock plans and server-validated Nebius plans may qualify; model-authored patch content is never used. The service verifies plan integrity, provider/model provenance, absence of unsupported citations and equality of the current content-hashed analysis snapshot to the snapshot used for planning. Retrieve a proposal with `GET /api/v1/proposals/{proposal_id}`. The source file remains unchanged. No approval or apply route exists. Runtime validation is explicitly `not_run`; the host does not execute repository tests or code. The optional isolated-runtime protocol is not backed by a sandbox implementation. The dashboard and handoff report display the plan provider and deterministic proposal generator separately.
 
 The static checks reject stale source, traversal, absolute paths, duplicate targets, sensitive paths, symlinks/junctions, binary/oversized targets, malformed or oversized diffs, and invalid Python syntax. Proposal generation reuses the existing authorized repository scanner and does not accept client paths or patches. This scenario is intentionally fixed; arbitrary model-authored changes and arbitrary repository modifications are out of scope.
 

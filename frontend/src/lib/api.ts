@@ -57,7 +57,11 @@ export const planTask = (repositoryId: string, taskDescription: string) =>
 export const createProposal = (repositoryId: string, taskId: string) =>
   requestJson<CodeChangeProposal>("api/v1/proposals/create", {
     method: "POST",
-    body: JSON.stringify({ repository_id: repositoryId, task_id: taskId }),
+    body: JSON.stringify({
+      repository_id: repositoryId,
+      task_id: taskId,
+      transformation_id: "calculator-zero-denominator-value-error-v1",
+    }),
   });
 
 export const getLocalReviewStatus = () => requestJson<LocalReviewStatus>("api/v1/reviews/status");

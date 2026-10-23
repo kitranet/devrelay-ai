@@ -8,7 +8,7 @@ describe("handoff markdown export", () => {
       report_id: "report-id", generated_at: "2026-10-21T00:00:00Z", repository_id: "planning-fixture",
       task: {
         task_id: "task-id", objective: "Fix division by zero", current_progress: "Review recorded; no changes applied.",
-        task_status: "planned", proposal_lifecycle_state: "review_approved", proposal_version: 2,
+        task_status: "planned", planning_provider: "nebius", proposal_lifecycle_state: "review_approved", proposal_version: 2,
         relevant_files: ["package/calculator.py"], source_references: [{ path: "package/calculator.py", line: 1, end_line: 2 }], planned_steps: ["1. Inspect division", "Add a regression test"], planned_validation_requirements: ["Run tests", "Review the test report"],
       },
       technical_understanding: {
@@ -19,7 +19,8 @@ describe("handoff markdown export", () => {
       },
       proposed_change: {
         summary: "Guard a zero denominator", target_files: [{ path: "package/calculator.py", original_sha256: "a".repeat(64), source_reference: { path: "package/calculator.py", line: 1, end_line: 2 } }], diff_sha256: "b".repeat(64),
-        static_validation_status: "passed", validation_findings: [], provider: "mock", is_mock: true, source_revision_status: "current",
+        static_validation_status: "passed", validation_findings: [], provider: "mock", is_mock: true,
+        originating_plan_provider: "nebius", transformation_id: "calculator-zero-denominator-value-error-v1", source_revision_status: "current",
       },
       human_decisions: [{
         review_id: "review-id", proposal_id: "proposal-id", task_id: "task-id", repository_id: "planning-fixture",
@@ -48,6 +49,9 @@ describe("handoff markdown export", () => {
     expect(markdown).toContain("- Outstanding questions:\n  - Run tests in an isolated environment.");
     expect(markdown).toContain("### Planned implementation steps\n\n1. Inspect division\n2. Add a regression test");
     expect(markdown).toContain("### Planned validation\n\n- Run tests\n- Review the test report");
+    expect(markdown).toContain("### Planned validation\n\n- Run tests\n- Review the test report");
+    expect(markdown).toContain("- Planning provider: **nebius**");
+    expect(markdown).toContain("- Proposal generator: **deterministic allowlist**");
     expect(markdown).toContain("### Static checks");
     expect(markdown).toContain("### Runtime validation");
     expect(markdown).toContain("## Isolated runtime validation");
