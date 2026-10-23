@@ -54,7 +54,9 @@ class NebiusClient:
         self._http_client = http_client
         self._in_flight = threading.BoundedSemaphore(settings.nebius_max_in_flight_requests)
 
-    async def complete(self, messages: list[ChatMessage], max_tokens: int | None = None) -> InferenceResponse:
+    async def complete(
+        self, messages: list[ChatMessage], max_tokens: int | None = None, *, disable_thinking: bool = False
+    ) -> InferenceResponse:
         if self.settings.inference_provider != "nebius":
             raise LiveInferenceDisabledError()
         if self.settings.nebius_api_key is None or not self.settings.nebius_api_key.get_secret_value():
@@ -62,6 +64,8 @@ class NebiusClient:
         api_key = self.settings.nebius_api_key.get_secret_value()
         if not _is_safe_model_id(self.settings.nebius_model, api_key):
             raise ModelProviderError("The configured Nebius model identifier is invalid.")
+        if disable_thinking and self.settings.nebius_model != "nvidia/Nemotron-3_5-Lightning":
+            raise ModelProviderError("Thinking control is only enabled for the configured Nemotron 3.5 Lightning model.")
 
         output_tokens = self.settings.nebius_max_output_tokens if max_tokens is None else max_tokens
         if output_tokens < 1 or output_tokens > self.settings.nebius_max_output_tokens:
@@ -78,6 +82,8 @@ class NebiusClient:
             "messages": [message.model_dump() for message in messages],
             "max_tokens": output_tokens,
         }
+        if disable_thinking:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         headers = {"Authorization": f"Bearer {self.settings.nebius_api_key.get_secret_value()}"}
         started = time.perf_counter()
         try:

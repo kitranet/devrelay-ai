@@ -27,6 +27,7 @@ Set values in the local, git-ignored `.env` file or the process environment. `NE
 | `NEBIUS_BASE_URL` | `https://api.tokenfactory.nebius.com/v1/` | HTTPS Nebius Token Factory API base; only `api.tokenfactory[.<region>].nebius.com` hosts are accepted |
 | `NEBIUS_MODEL` | `nvidia/Nemotron-3_5-Lightning` | Model identifier |
 | `NEBIUS_API_KEY` | unset | Runtime API key for inference |
+| `NEBIUS_PLANNING_DISABLE_THINKING` | `false` | Opt in to `chat_template_kwargs.enable_thinking=false` only for task planning with `nvidia/Nemotron-3_5-Lightning`; Nebius endpoint support is not yet confirmed |
 | `NEBIUS_TIMEOUT_SECONDS` | `30` | Per-request timeout; range 0–600 (exclusive of 0) |
 | `NEBIUS_MAX_OUTPUT_TOKENS` | `1024` | Maximum completion token budget per request |
 | `NEBIUS_MAX_PROMPT_TOKENS` | `6000` | Maximum estimated prompt tokens; estimator uses serialized UTF-8 size and is not the provider tokenizer |

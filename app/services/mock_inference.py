@@ -13,9 +13,9 @@ _SCENARIOS = {
 
 class MockModelProvider:
     async def complete(
-        self, messages: list[ChatMessage], max_tokens: int = 1024
+        self, messages: list[ChatMessage], max_tokens: int = 1024, *, disable_thinking: bool = False
     ) -> InferenceResponse:
-        del max_tokens  # Kept for protocol compatibility; mock outputs are fixed.
+        del max_tokens, disable_thinking  # Mock outputs are fixed and provider options have no effect.
         scenario = next((message.content for message in reversed(messages) if message.role == "user"), "")
         content = _SCENARIOS.get(scenario)
         if content is None and scenario.startswith("DEVRELAY_PLAN_REQUEST\n"):

@@ -30,6 +30,8 @@ def proposal_client(tmp_path: Path):
     root = tmp_path / "synthetic-repository"
     shutil.copytree(PLANNING_REPO, root)
     client = TestClient(create_app(Settings(
+        _env_file=None,
+        nebius_api_key=None,
         inference_provider="mock",
         authorized_repositories={"planning-fixture": root},
     )))

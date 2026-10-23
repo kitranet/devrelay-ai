@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     nebius_base_url: str = "https://api.tokenfactory.nebius.com/v1/"
     nebius_model: str = "nvidia/Nemotron-3_5-Lightning"
     nebius_api_key: SecretStr | None = None
+    nebius_planning_disable_thinking: bool = False
     nebius_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
     nebius_max_output_tokens: int = Field(default=1024, ge=1, le=4096)
     nebius_max_prompt_tokens: int = Field(default=6_000, ge=256, le=32_000)

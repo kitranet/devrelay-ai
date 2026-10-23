@@ -27,6 +27,8 @@ def local_client(tmp_path: Path):
     root = tmp_path / "repo"
     shutil.copytree(FIXTURE, root)
     settings = Settings(
+        _env_file=None,
+        nebius_api_key=None,
         environment="development",
         inference_provider="mock",
         enable_local_reviews=True,
@@ -117,7 +119,7 @@ class MockSandboxExecutor:
 def test_review_feature_is_disabled_by_default(tmp_path: Path):
     root = tmp_path / "repo"
     shutil.copytree(FIXTURE, root)
-    app = create_app(Settings(inference_provider="mock", authorized_repositories={"planning-fixture": root}))
+    app = create_app(Settings(_env_file=None, nebius_api_key=None, inference_provider="mock", authorized_repositories={"planning-fixture": root}))
     with TestClient(app, base_url="http://127.0.0.1", client=("127.0.0.1", 54123)) as client:
         assert client.get("/api/v1/reviews/status").json()["enabled"] is False
         assert client.post("/api/v1/reviews", content="{}").status_code == 404
@@ -369,6 +371,8 @@ def test_handoff_is_traceable_mock_labeled_and_never_claims_runtime_tests(local_
 def test_review_routes_reject_non_loopback_clients(local_client):
     _, root = local_client
     app = create_app(Settings(
+        _env_file=None,
+        nebius_api_key=None,
         environment="development", inference_provider="mock", enable_local_reviews=True,
         authorized_repositories={"planning-fixture": root},
     ))
@@ -387,4 +391,4 @@ def test_review_flag_cannot_be_enabled_outside_development(tmp_path: Path):
     root = tmp_path / "repo"
     shutil.copytree(FIXTURE, root)
     with pytest.raises(ValidationError, match="only be enabled in development"):
-        Settings(environment="production", enable_local_reviews=True, authorized_repositories={"planning-fixture": root})
+        Settings(_env_file=None, environment="production", enable_local_reviews=True, authorized_repositories={"planning-fixture": root})

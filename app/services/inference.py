@@ -9,7 +9,9 @@ from app.services.mock_inference import MockModelProvider
 
 
 class InferenceProvider(Protocol):
-    async def complete(self, messages: list[ChatMessage], max_tokens: int = 1024) -> InferenceResponse: ...
+    async def complete(
+        self, messages: list[ChatMessage], max_tokens: int = 1024, *, disable_thinking: bool = False
+    ) -> InferenceResponse: ...
 
 
 class InferenceService:
@@ -17,6 +19,10 @@ class InferenceService:
         self._provider = provider
 
     async def generate(self, request: InferenceRequest) -> InferenceResponse:
+        if request.disable_thinking:
+            return await self._provider.complete(
+                request.messages, max_tokens=request.max_tokens, disable_thinking=True
+            )
         return await self._provider.complete(request.messages, max_tokens=request.max_tokens)
 
 

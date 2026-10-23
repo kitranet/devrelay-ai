@@ -7,7 +7,7 @@ from app.main import create_app
 
 
 def test_analysis_api_returns_structured_traceable_data(sample_repository):
-    application = create_app(Settings(authorized_repositories={"sample": sample_repository}))
+    application = create_app(Settings(_env_file=None, authorized_repositories={"sample": sample_repository}))
 
     async def request():
         async with application.router.lifespan_context(application):
@@ -28,7 +28,7 @@ def test_analysis_api_returns_structured_traceable_data(sample_repository):
 
 
 def test_analysis_api_rejects_path_as_repository_identifier(sample_repository):
-    application = create_app(Settings(authorized_repositories={"sample": sample_repository}))
+    application = create_app(Settings(_env_file=None, authorized_repositories={"sample": sample_repository}))
 
     async def request():
         async with httpx.AsyncClient(
@@ -43,7 +43,7 @@ def test_analysis_api_rejects_path_as_repository_identifier(sample_repository):
 
 
 def test_analysis_api_hides_unconfigured_repository_ids(sample_repository):
-    application = create_app(Settings(authorized_repositories={"sample": sample_repository}))
+    application = create_app(Settings(_env_file=None, authorized_repositories={"sample": sample_repository}))
 
     async def request():
         async with httpx.AsyncClient(

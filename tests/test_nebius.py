@@ -20,7 +20,14 @@ from app.models.inference import ChatMessage
 
 
 def _settings(**values):
-    return Settings(_env_file=None, nebius_api_key="unit-test-key", inference_provider="nebius", **values)
+    safe_values = {
+        "nebius_api_key": "unit-test-key",
+        "inference_provider": "nebius",
+        "nebius_base_url": "https://api.tokenfactory.nebius.com/v1/",
+        "nebius_model": "nvidia/Nemotron-3_5-Lightning",
+    }
+    safe_values.update(values)
+    return Settings(_env_file=None, **safe_values)
 
 
 def _response(*, content="{\"status\":\"unsupported\"}", finish_reason="stop", model="nvidia/Nemotron-3_5-Lightning", usage=None):
@@ -66,6 +73,61 @@ def test_successful_response_uses_configured_endpoint_model_and_safe_metadata():
         "input_tokens": 28, "output_tokens": 128, "reasoning_tokens": 64, "total_tokens": 156,
     }
     assert result.latency_ms is not None and result.latency_ms >= 0
+
+
+def test_thinking_control_is_added_only_when_explicitly_enabled():
+    async def run():
+        payloads = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            payloads.append(json.loads(request.content))
+            return _response()
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            client = NebiusClient(_settings(), http_client)
+            messages = [ChatMessage(role="user", content="Return a compact JSON object.")]
+            await client.complete(messages)
+            await client.complete(messages, disable_thinking=True)
+        return payloads
+
+    payloads = asyncio.run(run())
+    assert "chat_template_kwargs" not in payloads[0]
+    assert payloads[1]["chat_template_kwargs"] == {"enable_thinking": False}
+
+
+def test_thinking_control_rejects_non_lightning_model_before_request():
+    async def run():
+        requests = []
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: requests.append(request) or _response())) as http_client:
+            client = NebiusClient(_settings(nebius_model="nvidia/other-model"), http_client)
+            with pytest.raises(ModelProviderError, match="only enabled for the configured Nemotron"):
+                await client.complete([ChatMessage(role="user", content="hello")], disable_thinking=True)
+        return requests
+
+    assert asyncio.run(run()) == []
+
+
+def test_provider_rejection_of_thinking_control_is_not_retried_or_leaked(caplog):
+    async def run():
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(400, text="unsupported chat_template_kwargs unit-test-key")
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            client = NebiusClient(_settings(), http_client)
+            with pytest.raises(ModelProviderError, match="HTTP 400") as error:
+                await client.complete([ChatMessage(role="user", content="hello")], disable_thinking=True)
+        return requests, error.value
+
+    requests, error = asyncio.run(run())
+    assert len(requests) == 1
+    assert "chat_template_kwargs" in requests[0].content.decode()
+    assert "unsupported" not in str(error)
+    assert "unit-test-key" not in str(error)
+    assert "unit-test-key" not in caplog.text
 
 
 def test_provider_default_does_not_make_paid_calls_and_missing_key_is_rejected(monkeypatch):

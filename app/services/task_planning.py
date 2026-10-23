@@ -78,13 +78,24 @@ class TaskPlanningService:
             inference = await asyncio.wait_for(
                 self.inference.generate(InferenceRequest(messages=[
                     ChatMessage(role="system", content=(
-                        "Create a conservative engineering plan using only the supplied static repository analysis. "
-                        "Return one JSON object matching the requested schema; do not include private chain-of-thought. "
-                        "Cite only supplied source references. "
-                        "Do not claim to inspect source content that is absent. Unknown or ambiguous tasks must use status unsupported or insufficient_context."
+                        "Produce a compact engineering plan using only the supplied static repository analysis. "
+                        "Return exactly one valid JSON object with status, relevant_files, source_references, "
+                        "implementation_steps, expected_code_changes, risks, dependencies, "
+                        "validation_requirements, and assumptions. No Markdown or commentary before or after it. "
+                        "Use at most 4 implementation steps, 5 relevant files, 5 source references, 4 risks, "
+                        "4 validation requirements, and 3 assumptions. Keep descriptions brief. "
+                        "Cite only supplied source references and use realistic steps tied to that evidence. "
+                        "Do not invent files, code snippets, test results, or source content. "
+                        "Do not include internal reasoning. If evidence is insufficient or the task is unsupported, "
+                        "return the corresponding status with concise empty or evidence-backed fields."
                     )),
                     ChatMessage(role="user", content="DEVRELAY_PLAN_REQUEST\n" + encoded),
-                ], max_tokens=self.settings.nebius_max_output_tokens)),
+                ], max_tokens=self.settings.nebius_max_output_tokens,
+                    disable_thinking=(
+                        self.settings.inference_provider == "nebius"
+                        and self.settings.nebius_planning_disable_thinking
+                        and self.settings.nebius_model == "nvidia/Nemotron-3_5-Lightning"
+                    ))),
                 timeout=self.settings.task_planning_timeout_seconds,
             )
         except asyncio.TimeoutError as exc:

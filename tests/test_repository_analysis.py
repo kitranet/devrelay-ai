@@ -16,7 +16,7 @@ from app.services.repository_analysis import RepositoryScanner
 
 def make_scanner(repository: Path, **overrides) -> RepositoryScanner:
     return RepositoryScanner(
-        Settings(authorized_repositories={"sample": repository}, **overrides)
+        Settings(_env_file=None, authorized_repositories={"sample": repository}, **overrides)
     )
 
 
@@ -207,6 +207,7 @@ def test_processing_time_limit_is_enforced(sample_repository):
 
     scanner = RepositoryScanner(
         Settings(
+            _env_file=None,
             authorized_repositories={"sample": sample_repository},
             repository_max_processing_seconds=0.001,
         ),

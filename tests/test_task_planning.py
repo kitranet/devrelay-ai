@@ -13,12 +13,15 @@ from app.services.mock_inference import MockModelProvider
 PLANNING_REPO = Path(__file__).parent / "fixtures" / "planning_repo"
 
 
-def make_client(tmp_path: Path, *, provider="mock") -> TestClient:
+def make_client(tmp_path: Path, *, provider="mock", **settings_overrides) -> TestClient:
     root = tmp_path / "repo"
     shutil.copytree(PLANNING_REPO, root)
     settings = Settings(
+        _env_file=None,
+        nebius_api_key=None,
         inference_provider=provider,
         authorized_repositories={"planning-fixture": root},
+        **settings_overrides,
     )
     return TestClient(create_app(settings))
 
@@ -111,6 +114,7 @@ def test_empty_authorized_repository_returns_insufficient_context(tmp_path):
     empty = tmp_path / "empty"
     empty.mkdir()
     client = TestClient(create_app(Settings(
+        _env_file=None, nebius_api_key=None,
         inference_provider="mock", authorized_repositories={"empty-fixture": empty}
     )))
     with client:
@@ -202,6 +206,46 @@ def test_live_provider_structured_plan_returns_only_safe_diagnostics(tmp_path):
         "usage": {"input_tokens": 280, "output_tokens": 192, "reasoning_tokens": 72, "total_tokens": 472},
     }
     assert all(":" not in reference["path"] for reference in body["source_references"])
+
+
+def test_planner_uses_compact_json_instructions_and_gates_optional_thinking_control(tmp_path):
+    class InspectProvider:
+        def __init__(self):
+            self.calls = []
+
+        async def complete(self, messages, max_tokens=1024, *, disable_thinking=False):
+            self.calls.append((messages, max_tokens, disable_thinking))
+            return await MockModelProvider().complete(messages, max_tokens)
+
+    with make_client(tmp_path, provider="nebius", nebius_planning_disable_thinking=True) as client:
+        provider = InspectProvider()
+        client.app.state.inference_service._provider = provider
+        payload = {
+            "repository_id": "planning-fixture",
+            "task_description": "Fix the division by zero defect in the calculator",
+        }
+        response = client.post("/api/v1/tasks/plan", json=payload)
+        assert response.status_code == 200
+        assert provider.calls[-1][2] is True
+        system_prompt = provider.calls[-1][0][0].content
+        for required in (
+            "exactly one valid JSON object", "No Markdown", "at most 4 implementation steps",
+            "5 relevant files", "5 source references", "4 risks", "4 validation requirements",
+            "3 assumptions", "only supplied source references", "Do not invent files",
+            "Do not include internal reasoning",
+        ):
+            assert required in system_prompt
+
+        client.app.state.settings.nebius_model = "nvidia/other-model"
+        response = client.post("/api/v1/tasks/plan", json=payload)
+        assert response.status_code == 200
+        assert provider.calls[-1][2] is False
+
+        client.app.state.settings.inference_provider = "mock"
+        client.app.state.settings.nebius_model = "nvidia/Nemotron-3_5-Lightning"
+        response = client.post("/api/v1/tasks/plan", json=payload)
+        assert response.status_code == 200
+        assert provider.calls[-1][2] is False
 
 
 def test_truncated_live_response_is_rejected_before_plan_parsing(tmp_path):

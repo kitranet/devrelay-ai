@@ -22,6 +22,8 @@ The mock provider supports only the three synthetic evaluation scenarios documen
 
 The configured live model is `nvidia/Nemotron-3_5-Lightning` at `https://api.tokenfactory.nebius.com/v1/`. Connectivity and a complete structured answer are separate checks; an HTTP success with `finish_reason=length` is not a usable plan.
 
+Task planning asks for a compact JSON plan (up to 4 steps, 5 relevant files, 5 references, 4 risks, 4 validation requirements, and 3 assumptions). `NEBIUS_PLANNING_DISABLE_THINKING` defaults to `false`. When explicitly enabled, only the planning request for the exact configured `nvidia/Nemotron-3_5-Lightning` model includes `chat_template_kwargs: {"enable_thinking": false}`. Smoke tests and mock inference are unaffected. Nebius support for this model-specific option remains unverified; rejection is returned as a sanitized provider error with no retry. Output limits, schema/evidence validation, human approval and read-only behavior remain unchanged.
+
 ## Safe code proposals (Phase 4B)
 
 `POST /api/v1/proposals/create` accepts a repository ID and a server-generated task ID. The plan must still be present in the bounded, process-local task store, be a `planned` mock task, require human approval, remain `not_started`, cite `package/calculator.py`, and describe the predefined division-by-zero scenario. The service re-analyzes the authorized repository and checks the source revision hash captured when the plan was created. A mismatch fails with a conflict; the client cannot submit arbitrary patch content or a filesystem path.

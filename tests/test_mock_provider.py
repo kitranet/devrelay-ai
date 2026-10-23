@@ -9,7 +9,7 @@ from app.services.mock_inference import MockModelProvider
 
 
 def test_mock_provider_is_selected_explicitly_and_is_deterministic_without_credentials():
-    service = build_inference_service(Settings(inference_provider="mock"))
+    service = build_inference_service(Settings(_env_file=None, inference_provider="mock", nebius_api_key=None))
     request = InferenceRequest(messages=[ChatMessage(role="user", content="mock://handoff-summary")])
 
     async def generate_twice():
@@ -24,7 +24,7 @@ def test_mock_provider_is_selected_explicitly_and_is_deterministic_without_crede
 
 
 def test_nebius_failure_does_not_fall_back_to_mock():
-    service = build_inference_service(Settings(inference_provider="nebius"))
+    service = build_inference_service(Settings(_env_file=None, inference_provider="nebius", nebius_api_key=None))
     request = InferenceRequest(messages=[ChatMessage(role="user", content="mock://health")])
 
     async def generate():
@@ -44,3 +44,16 @@ def test_default_provider_stays_mock_even_when_a_key_is_configured(monkeypatch):
     request = InferenceRequest(messages=[ChatMessage(role="user", content="mock://health")])
     response = asyncio.run(service.generate(request))
     assert response.provider == "mock" and response.is_mock is True
+
+
+def test_planning_thinking_option_does_not_change_mock_output():
+    service = build_inference_service(Settings(_env_file=None, inference_provider="mock", nebius_api_key=None))
+    message = ChatMessage(role="user", content="mock://health")
+
+    async def compare():
+        normal = await service.generate(InferenceRequest(messages=[message]))
+        flagged = await service.generate(InferenceRequest(messages=[message], disable_thinking=True))
+        return normal, flagged
+
+    normal, flagged = asyncio.run(compare())
+    assert normal == flagged
