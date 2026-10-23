@@ -69,6 +69,7 @@ def test_successful_response_uses_configured_endpoint_model_and_safe_metadata():
     assert result.model == "nvidia/Nemotron-3_5-Lightning"
     assert result.model_reported_by_provider is True
     assert result.completion_status == "completed" and result.finish_reason == "stop"
+    assert json.loads(result.content) == {"status": "unsupported"}
     assert result.usage.model_dump() == {
         "input_tokens": 28, "output_tokens": 128, "reasoning_tokens": 64, "total_tokens": 156,
     }
@@ -88,11 +89,21 @@ def test_thinking_control_is_added_only_when_explicitly_enabled():
             messages = [ChatMessage(role="user", content="Return a compact JSON object.")]
             await client.complete(messages)
             await client.complete(messages, disable_thinking=True)
+            await client.complete(messages, json_mode=True)
+            await client.complete(messages, disable_thinking=True, json_mode=True)
         return payloads
 
     payloads = asyncio.run(run())
-    assert "chat_template_kwargs" not in payloads[0]
-    assert payloads[1]["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "extra_body" not in payloads[0]
+    assert payloads[1]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+    assert "response_format" not in payloads[0]
+    assert payloads[2]["response_format"] == {"type": "json_object"}
+    assert payloads[3]["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+    assert payloads[3]["response_format"] == {"type": "json_object"}
 
 
 def test_thinking_control_rejects_non_lightning_model_before_request():
@@ -144,10 +155,11 @@ def test_provider_default_does_not_make_paid_calls_and_missing_key_is_rejected(m
     asyncio.run(run())
 
 
-def test_truncated_response_is_rejected_without_exposing_partial_content(caplog):
+@pytest.mark.parametrize("content", ["", '{"partial secret answer":'])
+def test_truncated_response_is_rejected_without_exposing_partial_content(content, caplog):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _response(
-            content='{"secret partial answer":', finish_reason="length",
+            content=content, finish_reason="length",
             usage={"prompt_tokens": 28, "completion_tokens": 128, "reasoning_tokens": 128, "total_tokens": 156},
         ))) as http_client:
             return await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])

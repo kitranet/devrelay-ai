@@ -13,9 +13,15 @@ _SCENARIOS = {
 
 class MockModelProvider:
     async def complete(
-        self, messages: list[ChatMessage], max_tokens: int = 1024, *, disable_thinking: bool = False
+        self,
+        messages: list[ChatMessage],
+        max_tokens: int = 1024,
+        *,
+        disable_thinking: bool = False,
+        json_mode: bool = False,
     ) -> InferenceResponse:
-        del max_tokens, disable_thinking  # Mock outputs are fixed and provider options have no effect.
+        # Mock outputs are fixed; provider generation options have no effect.
+        del max_tokens, disable_thinking, json_mode
         scenario = next((message.content for message in reversed(messages) if message.role == "user"), "")
         content = _SCENARIOS.get(scenario)
         if content is None and scenario.startswith("DEVRELAY_PLAN_REQUEST\n"):
@@ -42,7 +48,7 @@ class MockModelProvider:
             available_files = set(context["available_files"])
             references = context["source_references"]
         except (json.JSONDecodeError, KeyError, TypeError):
-            return json.dumps({"status": "unsupported"})
+            return MockModelProvider._unsupported_plan()
 
         if "division by zero" in task:
             files = ["package/calculator.py", "tests/test_calculator.py"]
@@ -69,14 +75,14 @@ class MockModelProvider:
             ]
             risk = "The requested behavior is exploratory; no implementation change should be made until expected behavior is clarified."
         else:
-            return json.dumps({"status": "unsupported"})
+            return MockModelProvider._unsupported_plan()
 
         # Emit only traceable references present in the supplied analysis context.
         selected_refs = [ref for ref in references if ref.get("path") in files]
         known = available_files
         missing = [path for path in files if path not in known]
         if missing or not selected_refs:
-            return json.dumps({"status": "unsupported"})
+            return MockModelProvider._unsupported_plan()
         first_ref = selected_refs[0]
         return json.dumps({
             "status": "planned",
@@ -92,5 +98,19 @@ class MockModelProvider:
             "risks": [risk],
             "dependencies": [],
             "validation_requirements": [f"Run {path}" for path in files if path.startswith("tests/")],
+            "assumptions": [],
+        })
+
+    @staticmethod
+    def _unsupported_plan() -> str:
+        return json.dumps({
+            "status": "unsupported",
+            "relevant_files": [],
+            "source_references": [],
+            "implementation_steps": [],
+            "expected_code_changes": [],
+            "risks": [],
+            "dependencies": [],
+            "validation_requirements": [],
             "assumptions": [],
         })

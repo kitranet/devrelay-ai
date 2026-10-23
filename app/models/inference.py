@@ -14,6 +14,7 @@ class InferenceRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1, max_length=100)
     max_tokens: int = Field(default=1024, ge=1, le=8192)
     disable_thinking: bool = False
+    json_mode: bool = False
 
 
 class InferenceUsage(BaseModel):

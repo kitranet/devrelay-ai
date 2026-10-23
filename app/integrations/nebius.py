@@ -55,7 +55,12 @@ class NebiusClient:
         self._in_flight = threading.BoundedSemaphore(settings.nebius_max_in_flight_requests)
 
     async def complete(
-        self, messages: list[ChatMessage], max_tokens: int | None = None, *, disable_thinking: bool = False
+        self,
+        messages: list[ChatMessage],
+        max_tokens: int | None = None,
+        *,
+        disable_thinking: bool = False,
+        json_mode: bool = False,
     ) -> InferenceResponse:
         if self.settings.inference_provider != "nebius":
             raise LiveInferenceDisabledError()
@@ -83,7 +88,11 @@ class NebiusClient:
             "max_tokens": output_tokens,
         }
         if disable_thinking:
-            payload["chat_template_kwargs"] = {"enable_thinking": False}
+            payload["extra_body"] = {
+                "chat_template_kwargs": {"enable_thinking": False}
+            }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self.settings.nebius_api_key.get_secret_value()}"}
         started = time.perf_counter()
         try:

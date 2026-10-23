@@ -49,11 +49,11 @@ class PlanGeneration(BaseModel):
     """Provider-authored plan payload, validated before API metadata is added."""
 
     status: Literal["planned", "insufficient_context", "unsupported"]
-    relevant_files: list[str] = Field(default_factory=list, max_length=50)
-    source_references: list[SourceReference] = Field(default_factory=list, max_length=100)
-    implementation_steps: list[PlanStep] = Field(default_factory=list, max_length=20)
-    expected_code_changes: list[ExpectedCodeChange] = Field(default_factory=list, max_length=50)
-    risks: list[str] = Field(default_factory=list, max_length=30)
-    dependencies: list[str] = Field(default_factory=list, max_length=50)
-    validation_requirements: list[str] = Field(default_factory=list, max_length=50)
-    assumptions: list[str] = Field(default_factory=list, max_length=30)
+    relevant_files: list[str] = Field(max_length=5)
+    source_references: list[SourceReference] = Field(max_length=5)
+    implementation_steps: list[PlanStep] = Field(max_length=4)
+    expected_code_changes: list[ExpectedCodeChange] = Field(max_length=5)
+    risks: list[str] = Field(max_length=4)
+    dependencies: list[str] = Field(max_length=4)
+    validation_requirements: list[str] = Field(max_length=4)
+    assumptions: list[str] = Field(max_length=3)

@@ -32,11 +32,86 @@ _UNSAFE_TASK_PATTERNS = (
     re.compile(r"\b(bypass authentication|evade detection|disable audit logging)\b", re.IGNORECASE),
     re.compile(r"\b(run|execute) arbitrary shell commands?\b", re.IGNORECASE),
 )
+_PLAN_SCHEMA_PATHS = {
+    ("status",),
+    ("relevant_files",), ("relevant_files", "*"),
+    ("source_references",), ("source_references", "*"),
+    ("source_references", "*", "path"), ("source_references", "*", "line"),
+    ("source_references", "*", "end_line"),
+    ("implementation_steps",), ("implementation_steps", "*"),
+    ("implementation_steps", "*", "step"), ("implementation_steps", "*", "description"),
+    ("implementation_steps", "*", "source_references"),
+    ("implementation_steps", "*", "source_references", "*"),
+    ("implementation_steps", "*", "source_references", "*", "path"),
+    ("implementation_steps", "*", "source_references", "*", "line"),
+    ("implementation_steps", "*", "source_references", "*", "end_line"),
+    ("expected_code_changes",), ("expected_code_changes", "*"),
+    ("expected_code_changes", "*", "path"), ("expected_code_changes", "*", "description"),
+    ("risks",), ("risks", "*"), ("dependencies",), ("dependencies", "*"),
+    ("validation_requirements",), ("validation_requirements", "*"),
+    ("assumptions",), ("assumptions", "*"),
+}
+_PLAN_ARRAY_PATHS = {
+    "relevant_files", "source_references", "implementation_steps", "expected_code_changes",
+    "risks", "dependencies", "validation_requirements", "assumptions",
+    "implementation_steps[].source_references",
+}
 
 
 def _contains_sensitive_text(value: str, configured_key: str | None) -> bool:
     """Detect likely credentials without logging or returning the matched text."""
     return bool((configured_key and configured_key in value) or _SECRET_LIKE.search(value))
+
+
+def _safe_schema_path(location: tuple[object, ...]) -> str:
+    normalized = tuple("*" if isinstance(part, int) else part for part in location)
+    if normalized not in _PLAN_SCHEMA_PATHS:
+        return "unknown"
+    rendered: list[str] = []
+    for part in normalized:
+        if part == "*" and rendered:
+            rendered[-1] += "[]"
+        else:
+            rendered.append("[]" if part == "*" else str(part))
+    return ".".join(rendered)
+
+
+def _validation_diagnostics(error: ValidationError) -> tuple[list[str], list[dict[str, str]]]:
+    categories: set[str] = set()
+    details: list[dict[str, str]] = []
+    for item in error.errors(include_input=False, include_url=False)[:10]:
+        error_type = item.get("type", "")
+        location = item.get("loc", ())
+        path = _safe_schema_path(tuple(location))
+        if error_type == "missing":
+            category = "missing_required_field"
+        elif error_type == "literal_error":
+            category = "invalid_enum_value"
+        elif error_type == "too_long":
+            category = "excessive_item_count" if path in _PLAN_ARRAY_PATHS else "field_limit_exceeded"
+        elif error_type == "extra_forbidden":
+            category = "unexpected_field"
+        elif error_type.endswith("_type") or error_type == "model_type":
+            category = "incorrect_field_type"
+        else:
+            category = "schema_constraint_failed"
+        categories.add(category)
+        details.append({"path": path, "category": category})
+    if not categories:
+        categories.add("schema_constraint_failed")
+    return sorted(categories), details
+
+
+def _log_plan_validation_failure(
+    *, provider: str, category: str, field_errors: list[dict[str, str]] | None = None,
+    root_type: str | None = None,
+) -> None:
+    diagnostic: dict[str, object] = {"provider": provider, "category": category}
+    if field_errors:
+        diagnostic["field_errors"] = field_errors
+    if root_type:
+        diagnostic["root_type"] = root_type
+    logger.warning("Planning response rejected; diagnostics=%s", json.dumps(diagnostic, separators=(",", ":")))
 
 
 class TaskPlanningService:
@@ -79,18 +154,35 @@ class TaskPlanningService:
                 self.inference.generate(InferenceRequest(messages=[
                     ChatMessage(role="system", content=(
                         "Produce a compact engineering plan using only the supplied static repository analysis. "
-                        "Return exactly one valid JSON object with status, relevant_files, source_references, "
-                        "implementation_steps, expected_code_changes, risks, dependencies, "
-                        "validation_requirements, and assumptions. No Markdown or commentary before or after it. "
-                        "Use at most 4 implementation steps, 5 relevant files, 5 source references, 4 risks, "
-                        "4 validation requirements, and 3 assumptions. Keep descriptions brief. "
-                        "Cite only supplied source references and use realistic steps tied to that evidence. "
-                        "Do not invent files, code snippets, test results, or source content. "
-                        "Do not include internal reasoning. If evidence is insufficient or the task is unsupported, "
-                        "return the corresponding status with concise empty or evidence-backed fields."
+                        "Return exactly one JSON object matching this shape: "
+                        "{\"status\":\"planned\",\"relevant_files\":[\"path\"],"
+                        "\"source_references\":[{\"path\":\"path\",\"line\":1,\"end_line\":null}],"
+                        "\"implementation_steps\":[{\"step\":1,\"description\":\"text\",\"source_references\":[]}],"
+                        "\"expected_code_changes\":[{\"path\":\"path\",\"description\":\"text\"}],"
+                        "\"risks\":[],\"dependencies\":[],\"validation_requirements\":[],\"assumptions\":[]}. "
+                        "Include every key. status must be exactly one of planned, insufficient_context, or unsupported; "
+                        "use empty arrays when none apply. "
+                        "Array item types are: strings for relevant_files, risks, dependencies, validation_requirements, "
+                        "and assumptions; source-reference objects for source_references; step objects for "
+                        "implementation_steps; and path/description objects for expected_code_changes. "
+                        "Each source reference must copy an exact supplied path, positive integer line, and "
+                        "positive integer end_line or null when absent. Copy the complete reference object exactly; "
+                        "do not shorten a supplied range to its start line. A reference with end_line omitted is "
+                        "treated as a line-only citation and is valid only when that exact start line is analyzed. "
+                        "Step descriptions must be 1-1000 characters; "
+                        "expected-code-change descriptions must be 1-500 characters. "
+                        "Use at most 4 steps, 5 files, 5 top-level references, 20 references per step, "
+                        "5 expected changes, 4 risks, 4 dependencies, "
+                        "4 validation requirements, and 3 assumptions. Keep text brief. "
+                        "Cite only supplied references and use only supplied file paths. Do not invent source, "
+                        "code snippets, test results, or files. No Markdown, commentary, or internal reasoning."
                     )),
                     ChatMessage(role="user", content="DEVRELAY_PLAN_REQUEST\n" + encoded),
                 ], max_tokens=self.settings.nebius_max_output_tokens,
+                    json_mode=(
+                        self.settings.inference_provider == "nebius"
+                        and self.settings.nebius_model == "nvidia/Nemotron-3_5-Lightning"
+                    ),
                     disable_thinking=(
                         self.settings.inference_provider == "nebius"
                         and self.settings.nebius_planning_disable_thinking
@@ -106,11 +198,32 @@ class TaskPlanningService:
         if inference.completion_status != "completed":
             raise ModelIncompleteResponseError()
         if not inference.content.strip():
+            _log_plan_validation_failure(provider=inference.provider, category="empty_model_content")
             raise ModelEmptyResponseError()
         try:
-            generation = PlanGeneration.model_validate_json(inference.content)
-        except (ValidationError, ValueError):
-            logger.warning("Planning provider returned invalid plan schema; provider=%s", inference.provider)
+            decoded = json.loads(inference.content)
+        except json.JSONDecodeError:
+            _log_plan_validation_failure(provider=inference.provider, category="invalid_json_syntax")
+            raise TaskPlanValidationError() from None
+        if not isinstance(decoded, dict):
+            root_type = (
+                "null" if decoded is None else "boolean" if isinstance(decoded, bool)
+                else "number" if isinstance(decoded, (int, float))
+                else "array" if isinstance(decoded, list) else "string"
+            )
+            _log_plan_validation_failure(
+                provider=inference.provider, category="incorrect_json_root_type", root_type=root_type
+            )
+            raise TaskPlanValidationError()
+        try:
+            generation = PlanGeneration.model_validate(decoded)
+        except ValidationError as exc:
+            categories, field_errors = _validation_diagnostics(exc)
+            _log_plan_validation_failure(
+                provider=inference.provider,
+                category="pydantic_validation_failed:" + ",".join(categories),
+                field_errors=field_errors,
+            )
             raise TaskPlanValidationError() from None
 
         if generation.status == "unsupported":
@@ -183,26 +296,49 @@ class TaskPlanningService:
             for item in analysis.functions + analysis.classes
         }
         references.update((item.source_path, item.line, None) for item in analysis.imports)
+        reference_starts = {(path, line) for path, line, _ in references}
 
         unsupported: list[str] = []
+        invalid_file_count = 0
+        invalid_source_reference_count = 0
+        invalid_change_count = 0
+        seen_invalid_references: set[tuple[str, int, int | None]] = set()
 
         def valid_reference(reference: SourceReference) -> bool:
+            nonlocal invalid_source_reference_count
             key = (reference.path, reference.line, reference.end_line)
-            if key not in references:
+            # A citation without an end line asserts only an analyzed start line.
+            # A supplied range must still exactly match the AST/import evidence.
+            is_valid = key in references if reference.end_line is not None else (key in references or key[:2] in reference_starts)
+            if not is_valid:
+                if key not in seen_invalid_references:
+                    invalid_source_reference_count += 1
+                    seen_invalid_references.add(key)
                 unsupported.append(f"{reference.path}:{reference.line}")
                 return False
             return True
+
+        def validated_references(items: list[SourceReference]) -> list[SourceReference]:
+            accepted: list[SourceReference] = []
+            seen: set[tuple[str, int, int | None]] = set()
+            for item in items:
+                key = (item.path, item.line, item.end_line)
+                if valid_reference(item) and key not in seen:
+                    accepted.append(item)
+                    seen.add(key)
+            return accepted
 
         valid_files = []
         for path in generation.relevant_files:
             if path in paths and path not in valid_files:
                 valid_files.append(path)
             else:
+                invalid_file_count += 1
                 unsupported.append(path)
-        valid_refs = [ref for ref in generation.source_references if valid_reference(ref)]
+        valid_refs = validated_references(generation.source_references)
         valid_steps = [
             PlanStep(step=step.step, description=step.description,
-                     source_references=[ref for ref in step.source_references if valid_reference(ref)])
+                     source_references=validated_references(step.source_references))
             for step in generation.implementation_steps
         ]
         valid_changes = []
@@ -210,7 +346,27 @@ class TaskPlanningService:
             if change.path in paths:
                 valid_changes.append(change)
             else:
+                invalid_change_count += 1
                 unsupported.append(change.path)
+
+        if unsupported:
+            categories = []
+            if invalid_file_count:
+                categories.append("unknown_file_path")
+            if invalid_source_reference_count:
+                categories.append("source_reference_not_in_analysis")
+            if invalid_change_count:
+                categories.append("expected_change_path_not_in_analysis")
+            logger.warning(
+                "Planning evidence rejected; diagnostics=%s",
+                json.dumps({
+                    "provider": inference.provider,
+                    "categories": categories,
+                    "invalid_file_count": invalid_file_count,
+                    "invalid_source_reference_count": invalid_source_reference_count,
+                    "invalid_change_count": invalid_change_count,
+                }, separators=(",", ":")),
+            )
 
         status = generation.status
         if unsupported:

@@ -169,6 +169,25 @@ describe("DevRelay dashboard", () => {
     expect(screen.queryByText(/chain of thought|internal reasoning/i)).not.toBeInTheDocument();
   });
 
+  it("labels rejected source citations as unverified instead of supporting evidence", async () => {
+    const partiallyGroundedPlan = {
+      ...liveTaskPlan,
+      status: "insufficient_context" as const,
+      unsupported_references: ["package/api.py:1", "package/calculator.py:1"],
+    };
+    vi.stubGlobal("fetch", routeFetch({ "api/v1/tasks/plan": partiallyGroundedPlan }));
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), "Fix the division by zero defect");
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    expect(await screen.findByText("AI-generated plan; verified evidence is listed separately. Rejected citations are unverified.")).toBeInTheDocument();
+    expect(screen.getByText("Unverified citations — rejected by source validation")).toBeInTheDocument();
+    expect(screen.getByText("package/api.py:1")).toBeInTheDocument();
+    expect(screen.getByText("package/calculator.py:1")).toBeInTheDocument();
+    expect(screen.getAllByText("package/calculator.py").length).toBeGreaterThan(0);
+  });
+
   it("creates and displays a mock review proposal without apply actions", async () => {
     const fetchMock = routeFetch({ "api/v1/tasks/plan": taskPlan, "api/v1/proposals/create": jsonResponse(codeProposal, 201) });
     vi.stubGlobal("fetch", fetchMock);
