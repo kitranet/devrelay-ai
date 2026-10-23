@@ -51,6 +51,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 /.pytest-tmp/
+/.pytest-tmp-*/
+/.phase7-eval-*/
 cover/
 
 # Translations

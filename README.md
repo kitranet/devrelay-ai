@@ -34,6 +34,21 @@ The Next.js dashboard lives in `frontend/`. Configure the synthetic repository i
 - [Architecture](docs/architecture.md)
 - [Setup and testing](docs/setup.md)
 - [Agent instructions](AGENTS.md)
+- [Phase 7 evaluation and measured results](docs/phase-7-evaluation.md)
+- [Repeatable demo script](docs/demo-script.md)
+- [Security limitations](docs/security-limitations.md)
+
+## Phase 7 demo and evaluation
+
+Run the offline end-to-end evaluation against a temporary copy of the synthetic calculator fixture with the deterministic mock provider:
+
+```powershell
+Set-Location C:\devrelay-ai
+.\.venv\Scripts\python.exe -m scripts.phase7_evaluation
+.\.venv\Scripts\python.exe -m pytest
+```
+
+The evaluation JSON is checked in at `docs/evaluation/phase-7-results.json`. Mock metrics are kept separate from the historical live Nemotron observation; running the evaluation never contacts Nebius. Follow [docs/demo-script.md](docs/demo-script.md) for the full repository-to-handoff walkthrough and the offline fallback. No generated proposal is applied or executed.
 
 ## License
 
