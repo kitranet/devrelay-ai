@@ -452,7 +452,7 @@ function ProposalResult({ proposal }: { proposal: CodeChangeProposal }) {
     <div className="proposal-findings"><h5>Static validation findings</h5><ul>{proposal.validation_findings.map((finding) => <li key={finding.check}><Badge tone={finding.status === "passed" ? "good" : "muted"}>{finding.status}</Badge><span>{finding.detail}</span></li>)}</ul></div>
     <h5>Unified diff</h5><pre className="proposal-diff"><code>{proposal.unified_diff}</code></pre>
     <div className="runtime-not-run"><strong>Runtime validation: not run</strong><p>{proposal.runtime_validation_reason}</p></div>
-    <p className="proposal-safety">Mock-generated proposal. No files were changed, approved, applied, or executed.</p>
+    <p className="proposal-safety">Deterministic proposal preview. No files were changed, approved, applied, or executed.</p>
   </section>;
 }
 

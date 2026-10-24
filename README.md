@@ -29,6 +29,8 @@ The Next.js dashboard lives in `frontend/`. Configure only the synthetic reposit
 - [Agent instructions](AGENTS.md)
 - [Phase 7 evaluation and measured results](docs/phase-7-evaluation.md)
 - [Repeatable demo script](docs/demo-script.md)
+- [Timed Phase 8D video storyboard and narration](docs/phase-8d-video-script.md)
+- [Windows recording and YouTube checklist](docs/recording-checklist.md)
 - [Security limitations](docs/security-limitations.md)
 - [Phase 8B deployment and judge guide](docs/deployment.md)
 
@@ -43,6 +45,8 @@ Set-Location C:\devrelay-ai
 ```
 
 The evaluation JSON is checked in at `docs/evaluation/phase-7-results.json`. Mock metrics are kept separate from the historical live Nemotron observation; running the evaluation never contacts Nebius. Follow [docs/demo-script.md](docs/demo-script.md) for the full repository-to-handoff walkthrough and the offline fallback. No generated proposal is applied or executed.
+
+For the public video, follow the [timed 2:55 storyboard and narration](docs/phase-8d-video-script.md) and [Windows recording checklist](docs/recording-checklist.md). The repeatable screen walkthrough uses clearly labeled mock inference; any historical Nemotron metrics are shown separately and are not presented as part of that mock run.
 
 ## License
 

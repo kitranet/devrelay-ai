@@ -1,10 +1,12 @@
 # DevRelay AI demonstration script
 
+For the final sub-three-minute public video, use [phase-8d-video-script.md](phase-8d-video-script.md) and the novice-oriented [Windows recording checklist](recording-checklist.md). That recording uses the synthetic fixture and deterministic mock provider. This API-level walkthrough remains the longer operator reference.
+
 ## Demonstration goal
 
 Show a receiving engineer how DevRelay moves from an explicitly authorized repository to a traceable task plan, a fixed deterministic proposal, a human-review gate, and a handoff report. The proposal is a preview only. No code is applied or executed.
 
-## Recommended mode: real Nemotron planning, local deterministic remainder
+## Optional mode: separately authorized live Nemotron planning
 
 This mode has one paid external model request only if the operator separately authorizes it. Repository analysis, proposal generation, review storage, and handoff generation are local deterministic application behavior. The model is not asked to generate a patch.
 

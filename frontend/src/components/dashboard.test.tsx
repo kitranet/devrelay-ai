@@ -206,6 +206,8 @@ describe("DevRelay dashboard", () => {
     expect(screen.getAllByText("Source SHA-256:", { exact: false }).length).toBeGreaterThan(0);
     expect(screen.getByText("Plan provider: nebius")).toBeInTheDocument();
     expect(screen.getByText("Proposal generator: deterministic allowlist")).toBeInTheDocument();
+    expect(screen.getByText(/Deterministic proposal preview/)).toBeInTheDocument();
+    expect(screen.queryByText(/Mock-generated proposal/)).not.toBeInTheDocument();
     expect(screen.getByText("Runtime validation: not run")).toBeInTheDocument();
     expect(screen.getByText(/No files were changed, approved, applied, or executed/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /apply|approve/i })).not.toBeInTheDocument();
