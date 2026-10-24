@@ -33,6 +33,29 @@ The Next.js dashboard lives in `frontend/`. Configure only the synthetic reposit
 - [Windows recording and YouTube checklist](docs/recording-checklist.md)
 - [Security limitations](docs/security-limitations.md)
 - [Phase 8B deployment and judge guide](docs/deployment.md)
+- [Phase 8D.4 continuity scenario and evaluation limits](docs/phase-8d4-evaluation.md)
+- [Phase 8D.5 evidence-grounded plan and handoff runbook](docs/phase-8d5-evidence-handoff.md)
+- [Synthetic incident brief](docs/continuity-pipeline-incident.md)
+- [Evaluator ground truth](docs/continuity-pipeline-ground-truth.md)
+- [Phase 8D.4 video storyboard](docs/phase-8d4-video-storyboard.md)
+
+## Phase 8D.4 continuity scenario
+
+The synthetic Northstar nightly-reporting fixture is a separate multi-file
+Python repository for evaluating cross-module analysis. Configure its absolute
+path under `continuity-pipeline-fixture` in `AUTHORIZED_REPOSITORIES` before
+selecting it in the dashboard. The neutral request is in
+`docs/continuity-pipeline-incident.md`; keep evaluator ground truth out of the
+model prompt. Run `python -m scripts.phase8d4_evaluation` for offline static
+analysis and bounded excerpt-selection measurements. The deterministic mock
+can exercise the plan-only interface, but it does not interpret source
+semantics and is not evidence of Nemotron reasoning. A plan-only handoff and
+plan review are now supported; both remain unreviewed until a local reviewer
+records a decision. Reviewer labels are unverified and data is process-local.
+The deterministic proposal remains calculator-only. A future genuine plan
+requires separate authorization for one live request and the existing durable
+quota controls. See the [Phase 8D.5 runbook](docs/phase-8d5-evidence-handoff.md)
+and [continuity storyboard](docs/phase-8d4-video-storyboard.md).
 
 ## Phase 7 demo and evaluation
 

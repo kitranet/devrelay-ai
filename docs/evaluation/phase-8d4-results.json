@@ -1,0 +1,220 @@
+{
+  "scenario": "synthetic_northstar_nightly_reporting",
+  "repository_id": "continuity-pipeline-fixture",
+  "mode": "offline_static_evidence_selection",
+  "provider": "mock",
+  "live_inference_enabled": false,
+  "inference_requests": 0,
+  "fixture_unchanged": true,
+  "workflow_support": {
+    "bounded_source_excerpts": true,
+    "plan_only_handoff_report": true,
+    "development_only_plan_review_without_proposal": true,
+    "non_calculator_deterministic_proposal": false,
+    "runtime_validation": "not_run"
+  },
+  "analysis": {
+    "file_count": 12,
+    "python_file_count": 10,
+    "module_count": 10,
+    "function_count": 9,
+    "class_count": 4,
+    "import_count": 25,
+    "test_file_count": 1,
+    "dependencies": [
+      {
+        "path": "requirements.txt",
+        "names": [
+          "pydantic>=2.0",
+          "pytest>=8.0"
+        ]
+      }
+    ],
+    "ground_truth_core_file_count": 5,
+    "ground_truth_core_files_discovered": 5,
+    "ground_truth_core_missing": [],
+    "ground_truth_coverage": 1.0,
+    "core_files_missing_from_excerpts": [],
+    "excerpt_file_count": 7,
+    "excerpt_paths": [
+      "pipeline/output.py",
+      "pipeline/validation.py",
+      "pipeline/retry.py",
+      "pipeline/orchestrator.py",
+      "pipeline/transform.py",
+      "tests/test_pipeline.py",
+      "pipeline/config.py"
+    ],
+    "excerpt_characters": 2708,
+    "excerpt_character_budget": 7000,
+    "excerpt_selection_deterministic": true,
+    "excerpt_locations_and_file_hashes_valid": true,
+    "imports": [
+      {
+        "source_path": "pipeline/config.py",
+        "line": 3,
+        "imported_module": "dataclasses",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/models.py",
+        "line": 3,
+        "imported_module": "pydantic",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 3,
+        "imported_module": "logging",
+        "kind": "import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 5,
+        "imported_module": "pipeline.config",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 6,
+        "imported_module": "pipeline.models",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 7,
+        "imported_module": "pipeline.output",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 8,
+        "imported_module": "pipeline.retry",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 9,
+        "imported_module": "pipeline.source",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 10,
+        "imported_module": "pipeline.transform",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/orchestrator.py",
+        "line": 11,
+        "imported_module": "pipeline.validation",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/output.py",
+        "line": 3,
+        "imported_module": "json",
+        "kind": "import"
+      },
+      {
+        "source_path": "pipeline/output.py",
+        "line": 4,
+        "imported_module": "pathlib",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/output.py",
+        "line": 6,
+        "imported_module": "pipeline.models",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/retry.py",
+        "line": 3,
+        "imported_module": "time",
+        "kind": "import"
+      },
+      {
+        "source_path": "pipeline/retry.py",
+        "line": 4,
+        "imported_module": "collections.abc",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/retry.py",
+        "line": 5,
+        "imported_module": "typing",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/source.py",
+        "line": 3,
+        "imported_module": "json",
+        "kind": "import"
+      },
+      {
+        "source_path": "pipeline/source.py",
+        "line": 4,
+        "imported_module": "pathlib",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/source.py",
+        "line": 6,
+        "imported_module": "pipeline.models",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/transform.py",
+        "line": 3,
+        "imported_module": "pipeline.models",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "pipeline/validation.py",
+        "line": 3,
+        "imported_module": "pipeline.models",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "tests/test_pipeline.py",
+        "line": 3,
+        "imported_module": "pipeline.config",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "tests/test_pipeline.py",
+        "line": 4,
+        "imported_module": "pipeline.models",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "tests/test_pipeline.py",
+        "line": 5,
+        "imported_module": "pipeline.transform",
+        "kind": "from_import"
+      },
+      {
+        "source_path": "tests/test_pipeline.py",
+        "line": 6,
+        "imported_module": "pipeline.validation",
+        "kind": "from_import"
+      }
+    ],
+    "warnings": []
+  },
+  "not_measured": [
+    "live_model_plan_schema_validity",
+    "live_model_citation_precision",
+    "live_model_root_cause_quality",
+    "live_model_investigation_completeness",
+    "live_model_handoff_quality",
+    "live_model_latency_tokens_cost"
+  ],
+  "notes": [
+    "This run scans files and selects static excerpts only; it does not call a model or the task API.",
+    "Fixture-specific file coverage and excerpt selection are not general model-quality scores.",
+    "Ground-truth diagnosis is stored separately and is never included in the planner context.",
+    "Offline mock plans are explicitly disclosed and are not evidence of Nemotron reasoning quality."
+  ]
+}

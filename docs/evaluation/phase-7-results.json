@@ -44,7 +44,7 @@
   },
   "evaluation_kind": "offline_mock_end_to_end",
   "fixture": "tests/fixtures/planning_repo",
-  "generated_at_utc": "2026-10-23T18:08:58.761059+00:00",
+  "generated_at_utc": "2026-10-24T17:54:33.735037+00:00",
   "historical_live_nebius_observation": {
     "estimated_cost_usd": 0.00017238,
     "input_tokens": 1349,
@@ -64,7 +64,7 @@
     "note": "Mock inference does not report model tokens, provider latency, or cost.",
     "output_tokens": null,
     "reasoning_tokens": null,
-    "workflow_elapsed_ms": 57.16
+    "workflow_elapsed_ms": 50.3
   },
   "plan_status": "planned",
   "provider": "mock",
