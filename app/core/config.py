@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     repository_max_processing_seconds: float = Field(default=10.0, gt=0, le=120)
     task_planning_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     task_context_max_chars: int = Field(default=16_000, gt=0, le=100_000)
+    task_evidence_max_files: int = Field(default=7, ge=1, le=7)
+    task_evidence_max_chars: int = Field(default=7_000, ge=512, le=8_000)
+    task_evidence_max_file_chars: int = Field(default=2_000, ge=128, le=2_400)
+    task_evidence_max_lines: int = Field(default=60, ge=1, le=80)
 
     model_config = SettingsConfigDict(
         env_file=".env",

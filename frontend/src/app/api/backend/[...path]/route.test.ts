@@ -110,6 +110,37 @@ describe("local backend proxy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("proxies only the plan-review and plan-only handoff endpoints with strict task/report UUIDs", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{"handoff_type":"plan_only"}', {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.BACKEND_API_URL = "http://127.0.0.1:8001";
+    const taskId = "2b7a47fb-5c38-481a-a35c-b4f4cc0d7047";
+    const reportId = "01e6d118-3477-45df-9a1a-0cfaf17d4ae8";
+    const review = await POST(authorizedRequest("http://localhost/api/backend/api/v1/reviews/plans", {
+      method: "POST", headers: { "Content-Type": "application/json", origin: "http://localhost" }, body: "{}",
+    }), { params: Promise.resolve({ path: ["api", "v1", "reviews", "plans"] }) });
+    expect(review.status).toBe(200);
+    const history = await GET(authorizedRequest(`http://localhost/api/backend/api/v1/reviews/plans/${taskId}`), {
+      params: Promise.resolve({ path: ["api", "v1", "reviews", "plans", taskId] }),
+    });
+    expect(history.status).toBe(200);
+    const handoff = await POST(authorizedRequest("http://localhost/api/backend/api/v1/handoffs/plans", {
+      method: "POST", headers: { "Content-Type": "application/json", origin: "http://localhost" }, body: "{}",
+    }), { params: Promise.resolve({ path: ["api", "v1", "handoffs", "plans"] }) });
+    expect(handoff.status).toBe(200);
+    const report = await GET(authorizedRequest(`http://localhost/api/backend/api/v1/handoffs/plans/${reportId}`), {
+      params: Promise.resolve({ path: ["api", "v1", "handoffs", "plans", reportId] }),
+    });
+    expect(report.status).toBe(200);
+    const malformed = await GET(authorizedRequest("http://localhost/api/backend/api/v1/handoffs/plans/not-a-uuid"), {
+      params: Promise.resolve({ path: ["api", "v1", "handoffs", "plans", "not-a-uuid"] }),
+    });
+    expect(malformed.status).toBe(404);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("allows only runtime-validation readiness, request, and UUID evidence routes", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response('{"status":"disabled"}', {
       status: 200, headers: { "Content-Type": "application/json" },

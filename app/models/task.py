@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.models.inference import InferenceDiagnostics
-from app.models.repository import SourceReference
+from app.models.repository import SourceExcerpt, SourceReference
 
 
 class TaskPlanningRequest(BaseModel):
@@ -24,8 +24,15 @@ class PlanStep(BaseModel):
     source_references: list[SourceReference] = Field(default_factory=list, max_length=20)
 
 
+class PlanFinding(BaseModel):
+    classification: Literal["observed", "suspected"]
+    description: str = Field(min_length=1, max_length=500)
+    source_references: list[SourceReference] = Field(default_factory=list, max_length=8)
+
+
 class TaskPlan(BaseModel):
     task_id: str
+    plan_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     repository_id: str
     task_description: str
     status: Literal["planned", "insufficient_context", "unsupported"]
@@ -40,6 +47,9 @@ class TaskPlan(BaseModel):
     execution_status: Literal["not_started"] = "not_started"
     assumptions: list[str] = Field(default_factory=list, max_length=30)
     unsupported_references: list[str] = Field(default_factory=list, max_length=50)
+    source_excerpts: list[SourceExcerpt] = Field(default_factory=list, max_length=7)
+    findings: list[PlanFinding] = Field(default_factory=list, max_length=6)
+    unresolved_questions: list[str] = Field(default_factory=list, max_length=6)
     provider: Literal["nebius", "mock"]
     is_mock: bool
     inference_diagnostics: InferenceDiagnostics | None = None
@@ -57,3 +67,5 @@ class PlanGeneration(BaseModel):
     dependencies: list[str] = Field(max_length=4)
     validation_requirements: list[str] = Field(max_length=4)
     assumptions: list[str] = Field(max_length=3)
+    findings: list[PlanFinding] = Field(default_factory=list, max_length=6)
+    unresolved_questions: list[str] = Field(default_factory=list, max_length=6)

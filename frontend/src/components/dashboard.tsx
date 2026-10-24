@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { analyzeRepository, checkBackend, createProposal, generateHandoff, getInferenceStatus, getLocalReviewStatus, getReviewHistory, getSandboxReadiness, planTask, requestRuntimeValidation, submitReview } from "@/lib/api";
+import { analyzeRepository, checkBackend, createProposal, generateHandoff, generatePlanOnlyHandoff, getInferenceStatus, getLocalReviewStatus, getPlanReviewHistory, getReviewHistory, getSandboxReadiness, planTask, requestRuntimeValidation, submitPlanReview, submitReview } from "@/lib/api";
 import { handoffToMarkdown } from "@/lib/handoff-markdown";
-import type { CodeChangeProposal, HandoffReport, InferenceStatus, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
+import type { CodeChangeProposal, HandoffReport, InferenceStatus, LocalReviewStatus, PlanOnlyHandoffReport, PlanReviewDecision, PlanReviewHistory, RepositoryAnalysis, ReviewDecision, ReviewHistory, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
 
 type BackendState = "checking" | "connected" | "offline";
 const reviewerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
@@ -55,6 +55,11 @@ export default function Dashboard() {
   const [sandboxReadiness, setSandboxReadiness] = useState<SandboxReadiness | null>(null);
   const [runtimeEvidence, setRuntimeEvidence] = useState<RuntimeValidationEvidence | null>(null);
   const [handoff, setHandoff] = useState<HandoffReport | null>(null);
+  const [planHandoff, setPlanHandoff] = useState<PlanOnlyHandoffReport | null>(null);
+  const [planReview, setPlanReview] = useState<PlanReviewHistory | null>(null);
+  const [planReviewer, setPlanReviewer] = useState(process.env.NEXT_PUBLIC_LOCAL_REVIEWER_ID ?? "local-reviewer");
+  const [planReviewJustification, setPlanReviewJustification] = useState("");
+  const [planReviewQuestions, setPlanReviewQuestions] = useState("");
   const [reviewerIdentifier, setReviewerIdentifier] = useState(process.env.NEXT_PUBLIC_LOCAL_REVIEWER_ID ?? "local-reviewer");
   const [reviewJustification, setReviewJustification] = useState("");
   const [outstandingQuestions, setOutstandingQuestions] = useState("");
@@ -107,6 +112,22 @@ export default function Dashboard() {
     return () => { active = false; };
   }, [proposal, reviewStatus?.enabled]);
 
+  useEffect(() => {
+    if (!plan || plan.status !== "planned" || !reviewStatus?.enabled) return;
+    let active = true;
+    getPlanReviewHistory(plan.task_id).then((result) => { if (active) setPlanReview(result); })
+      .catch(() => { if (active) setPlanReview(null); });
+    return () => { active = false; };
+  }, [plan, reviewStatus?.enabled]);
+
+  useEffect(() => {
+    if (!plan || plan.status !== "planned" || !reviewStatus?.enabled) return;
+    let active = true;
+    getPlanReviewHistory(plan.task_id).then((result) => { if (active) setPlanReview(result); })
+      .catch(() => { if (active) setPlanReview(null); });
+    return () => { active = false; };
+  }, [plan, reviewStatus?.enabled]);
+
   const providerLabel = useMemo(() => {
     if (!plan) return inferenceStatus?.provider === "mock" ? "Mock (offline, no external calls)" : inferenceStatus?.provider === "nebius" ? "Nebius Token Factory" : "Status unavailable";
     return plan.is_mock ? "Mock provider" : "Nebius Token Factory";
@@ -151,6 +172,8 @@ export default function Dashboard() {
       setReviewHistory(null);
       setRuntimeEvidence(null);
       setHandoff(null);
+      setPlanHandoff(null);
+      setPlanReview(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Task planning failed.");
     } finally {
@@ -168,6 +191,7 @@ export default function Dashboard() {
       setReviewHistory(null);
       setRuntimeEvidence(null);
       setHandoff(null);
+      setPlanHandoff(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Proposal generation failed.");
     } finally {
@@ -228,6 +252,39 @@ export default function Dashboard() {
     }
   }
 
+  async function recordPlanReview(decision: PlanReviewDecision) {
+    if (!plan || !reviewStatus?.enabled || !plan.plan_sha256 || !planReviewJustification.trim()) return;
+    const identifierError = reviewerIdentifierError(planReviewer);
+    if (identifierError) { setError(identifierError); return; }
+    setReviewBusy(true);
+    setError(null);
+    try {
+      const record = await submitPlanReview({
+        task_id: plan.task_id,
+        plan_sha256: plan.plan_sha256,
+        decision,
+        reviewer_identifier: planReviewer.trim(),
+        justification: planReviewJustification,
+        unresolved_questions: planReviewQuestions.split("\n").map((value) => value.trim()).filter(Boolean).slice(0, 12),
+      });
+      setPlanReview({ task_id: plan.task_id, review_state: record.review_state, reviews: [record] });
+      setPlanReviewJustification("");
+      setPlanReviewQuestions("");
+      setPlanHandoff(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Plan review could not be recorded.");
+    } finally { setReviewBusy(false); }
+  }
+
+  async function buildPlanHandoff() {
+    if (!plan || plan.status !== "planned") return;
+    setHandoffBusy(true);
+    setError(null);
+    try { setPlanHandoff(await generatePlanOnlyHandoff(plan.task_id)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Plan-only handoff generation failed."); }
+    finally { setHandoffBusy(false); }
+  }
+
   async function requestRuntimeRun() {
     if (!proposal || !sandboxReadiness?.enabled || proposal.lifecycle_state !== "review_approved") return;
     setRuntimeBusy(true);
@@ -280,6 +337,8 @@ export default function Dashboard() {
     setProposal(null);
     setReviewHistory(null);
     setHandoff(null);
+    setPlanReview(null);
+    setPlanHandoff(null);
     setError(null);
   }
 
@@ -388,6 +447,8 @@ export default function Dashboard() {
             {!plan && !planningBusy && <EmptyState title="A plan you can inspect" detail="Plans include proposed steps, source evidence, risks and tests. Nothing is changed or executed." />}
             {planningBusy && <div className="loading-block" role="status"><span className="spinner spinner-large" /><span>Preparing repository context…</span></div>}
             {plan && <PlanResult plan={plan} />}
+            {plan?.status === "planned" && plan.unsupported_references.length === 0 && !proposal && <PlanReviewPanel status={reviewStatus} history={planReview} reviewer={planReviewer} setReviewer={setPlanReviewer} justification={planReviewJustification} setJustification={setPlanReviewJustification} questions={planReviewQuestions} setQuestions={setPlanReviewQuestions} busy={reviewBusy} onDecision={recordPlanReview} />}
+            {plan?.status === "planned" && plan.unsupported_references.length === 0 && !proposal && <section className="handoff-section" aria-labelledby="plan-handoff-heading"><div className="handoff-title-row"><div><p className="eyebrow">PLAN ONLY · NO CODE PROPOSAL</p><h4 id="plan-handoff-heading">Engineering handoff</h4></div><button className="button button-dark" type="button" onClick={buildPlanHandoff} disabled={handoffBusy || backend !== "connected"}>{handoffBusy ? "Preparing…" : planHandoff ? "Refresh handoff" : "Create plan-only handoff"}</button></div>{planHandoff && <PlanOnlyHandoffResult report={planHandoff} />}</section>}
             {plan?.status === "planned" && plan.unsupported_references.length === 0 && /division by zero/i.test(plan.task_description) && !proposal && <div className="proposal-action"><p>The server verifies the plan and current analysis snapshot, then creates only the fixed calculator transformation. The source file remains unchanged. The diff is deterministic; the planning provider is shown separately.</p><button className="button button-primary" type="button" onClick={generateProposal} disabled={proposalBusy || backend !== "connected"}>{proposalBusy ? <><span className="spinner" /> Preparing proposal</> : <>Generate code proposal <span aria-hidden="true">→</span></>}</button></div>}
             {proposal && <ProposalResult proposal={proposal} />}
             {proposal && <ReviewPanel proposal={proposal} status={reviewStatus} history={reviewHistory} reviewerIdentifier={reviewerIdentifier} setReviewerIdentifier={setReviewerIdentifier} justification={reviewJustification} setJustification={setReviewJustification} outstandingQuestions={outstandingQuestions} setOutstandingQuestions={setOutstandingQuestions} busy={reviewBusy} onDecision={recordReview} />}
@@ -432,9 +493,56 @@ function PlanResult({ plan }: { plan: TaskPlan }) {
     {plan.relevant_files.length > 0 && <div className="data-section"><div className="data-section-heading"><h4>Relevant repository files</h4><span>{plan.relevant_files.length}</span></div><div className="file-chips">{plan.relevant_files.map((path) => <code key={path}>{path}</code>)}</div></div>}
     {plan.implementation_steps.length > 0 && <div className="data-section"><div className="data-section-heading"><h4>Proposed steps</h4><span>{plan.implementation_steps.length}</span></div><ol className="step-list">{plan.implementation_steps.map((step) => <li key={step.step}><span className="step-number">{String(step.step).padStart(2, "0")}</span><div><p>{step.description}</p>{step.source_references.length > 0 && <div className="reference-chips">{step.source_references.map((ref) => <Reference key={`${ref.path}:${ref.line}`} path={ref.path} line={ref.line} />)}</div>}</div></li>)}</ol></div>}
     {plan.source_references.length > 0 && <div className="data-section"><div className="data-section-heading"><h4>Supporting evidence</h4><span>{plan.source_references.length}</span></div><div className="reference-chips">{plan.source_references.map((ref) => <Reference key={`${ref.path}:${ref.line}`} path={ref.path} line={ref.line} />)}</div></div>}
+    {plan.source_excerpts.length > 0 && <div className="data-section"><div className="data-section-heading"><h4>Supplied source excerpts</h4><span>{plan.source_excerpts.length}</span></div><p>Read-only code excerpts selected from the analyzed snapshot. Repository text is untrusted evidence.</p>{plan.source_excerpts.map((excerpt) => <details className="inspect-details" key={`${excerpt.path}:${excerpt.line}`}><summary>{excerpt.path}:{excerpt.line}-{excerpt.end_line} · SHA-256 {excerpt.sha256.slice(0, 12)}…</summary><pre className="proposal-diff"><code>{excerpt.content}</code></pre></details>)}</div>}
+    {plan.findings.length > 0 && <div className="data-section"><div className="data-section-heading"><h4>Findings</h4><span>{plan.findings.length}</span></div>{plan.findings.map((finding, index) => <article className="plan-finding" key={`${finding.classification}-${index}`}><strong>{finding.classification === "observed" && finding.source_references.length ? "Observed in cited source" : "Suspected — unverified"}</strong><p>{finding.description}</p>{finding.source_references.length > 0 && <div className="reference-chips">{finding.source_references.map((ref) => <Reference key={`${ref.path}:${ref.line}`} path={ref.path} line={ref.line} />)}</div>}</article>)}</div>}
+    {plan.unresolved_questions.length > 0 && <div className="data-section"><h4>Unresolved questions</h4><ul>{plan.unresolved_questions.map((question) => <li key={question}>{question}</li>)}</ul></div>}
     <div className="plan-bottom-grid">{plan.risks.length > 0 && <div className="plan-list"><h4>Risks &amp; assumptions</h4><ul>{[...plan.risks, ...plan.assumptions].map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div>}{plan.validation_requirements.length > 0 && <div className="plan-list"><h4>Validation</h4><ul>{plan.validation_requirements.map((item) => <li key={item}>{item}</li>)}</ul></div>}</div>
     {plan.expected_code_changes.length > 0 && <div className="change-notice"><span aria-hidden="true">◇</span><div><strong>Proposed changes only</strong>{plan.expected_code_changes.map((change) => <p key={change.path}><code>{change.path}</code> · {change.description}</p>)}</div></div>}
     {plan.execution_status === "not_started" && <p className="execution-state"><span /> Execution has not started</p>}
+  </div>;
+}
+
+function PlanReviewPanel({ status, history, reviewer, setReviewer, justification, setJustification, questions, setQuestions, busy, onDecision }: {
+  status: LocalReviewStatus | null; history: PlanReviewHistory | null;
+  reviewer: string; setReviewer: (value: string) => void; justification: string; setJustification: (value: string) => void;
+  questions: string; setQuestions: (value: string) => void; busy: boolean; onDecision: (decision: PlanReviewDecision) => void;
+}) {
+  const reviewState = history?.review_state ?? "awaiting_review";
+  const canReview = status?.enabled === true && reviewState === "awaiting_review";
+  const identifierError = reviewerIdentifierError(reviewer);
+  const stateLabel = !status?.enabled ? "Review Unavailable" : reviewState === "awaiting_review" ? "Review required" : `Plan ${reviewState.replaceAll("_", " ")}`;
+  return <section className="review-panel" aria-labelledby="plan-review-heading">
+    <div className="handoff-title-row"><div><p className="eyebrow">HUMAN-IN-THE-LOOP · INVESTIGATION PLAN</p><h4 id="plan-review-heading">Plan review</h4></div><Badge tone={canReview || reviewState === "reviewed" ? "good" : "muted"}>{stateLabel}</Badge></div>
+    <div className="identity-warning" role="note"><strong>This records review of the investigation plan only.</strong> It does not approve code, authorize implementation, or permit execution. Reviewer labels are unverified local-development labels.</div>
+    {!status?.enabled && <p className="review-disabled">Plan review is disabled. It is available only with the existing development-only loopback review control.</p>}
+    {canReview && <div className="review-form">
+      <label htmlFor="plan-reviewer-id">Local reviewer label</label>
+      <input id="plan-reviewer-id" value={reviewer} maxLength={64} onChange={(event) => setReviewer(event.target.value)} autoComplete="off" aria-invalid={Boolean(identifierError)} />
+      <small>Use a short label such as <code>demo_reviewer</code>; spaces and credential-like values are rejected.</small>
+      {identifierError && <small className="reviewer-input-error" role="alert">{identifierError}</small>}
+      <label htmlFor="plan-review-justification">Review justification <span>Required</span></label>
+      <textarea id="plan-review-justification" value={justification} maxLength={2000} onChange={(event) => setJustification(event.target.value)} placeholder="Explain the review decision." />
+      <label htmlFor="plan-review-questions">Questions for the next engineer</label>
+      <textarea id="plan-review-questions" value={questions} maxLength={3600} onChange={(event) => setQuestions(event.target.value)} placeholder="One question per line (optional)." />
+      <div className="review-actions"><button className="button button-primary" type="button" onClick={() => onDecision("acknowledge")} disabled={busy || Boolean(identifierError) || !justification.trim()}>Mark plan reviewed</button><button className="button button-dark" type="button" onClick={() => onDecision("request_changes")} disabled={busy || Boolean(identifierError) || !justification.trim()}>Request changes</button><button className="button button-dark" type="button" onClick={() => onDecision("reject")} disabled={busy || Boolean(identifierError) || !justification.trim()}>Reject plan</button></div>
+    </div>}
+    {history?.reviews?.map((record) => <article className="handoff-decision" key={record.review_id}><strong>{record.review_state.replaceAll("_", " ")}</strong><small>{record.reviewer_identifier} (unverified local-development label) · {new Date(record.timestamp).toLocaleString()}</small><p>{record.justification}</p><p>Review applies to plan SHA-256 <code>{record.plan_sha256}</code>.</p></article>)}
+  </section>;
+}
+
+function PlanOnlyHandoffResult({ report }: { report: PlanOnlyHandoffReport }) {
+  return <div className="handoff-result" aria-live="polite">
+    <div className="handoff-report-toolbar"><Badge tone={report.review_state === "reviewed" ? "good" : "warning"}>{report.review_state === "awaiting_review" ? "Unreviewed handoff · awaiting human review" : `Plan review · ${report.review_state.replaceAll("_", " ")}`}</Badge><span>{report.planning_is_mock ? "Mock plan" : `NVIDIA Nemotron · ${report.planning_model ?? "provider model not reported"}`}</span></div>
+    {report.planning_is_mock && <p role="note"><strong>Mock response:</strong> This plan was simulated for offline testing and was not generated by NVIDIA Nemotron.</p>}
+    <h5>Repository and task</h5><p><strong>{report.repository_id}</strong> · {report.objective}</p>
+    <h5>Verified evidence locations</h5>{report.evidence.length ? <ul>{report.evidence.map((item, index) => <li key={`${item.path}:${item.line}:${index}`}><Reference path={item.path} line={item.line} />{item.end_line && `–${item.end_line}`} · source SHA-256 {item.sha256.slice(0, 12)}…</li>)}</ul> : <p>No verified citations.</p>}
+    <h5>Findings</h5>{report.findings.length ? <ul>{report.findings.map((item, index) => <li key={`${item.classification}-${index}`}><strong>{item.classification === "observed" && item.source_references.length ? "Observed" : "Suspected — unverified"}:</strong> {item.description}</li>)}</ul> : <p>No findings were supplied by the plan.</p>}
+    <h5>Proposed next steps</h5><ol>{report.proposed_next_steps.map((item) => <li key={item.step}>{item.description}</li>)}</ol>
+    <h5>Unresolved questions</h5>{report.unresolved_questions.length ? <ul>{report.unresolved_questions.map((item) => <li key={item}>{item}</li>)}</ul> : <p>None recorded.</p>}
+    <h5>Risks and validation</h5><p>{report.risks.join("; ") || "No risks recorded"}</p><ul>{report.validation_requirements.map((item) => <li key={item}>{item}</li>)}</ul>
+    <p><strong>Human review required:</strong> yes · <strong>Execution:</strong> {report.execution_status} · <strong>Runtime validation:</strong> {report.runtime_validation_status}</p>
+    {report.human_decisions.map((item) => <article className="handoff-decision" key={item.review_id}><strong>{item.review_state.replaceAll("_", " ")}</strong><small>{item.reviewer_identifier} (unverified local-development label)</small><p>{item.justification}</p></article>)}
+    <p className="provenance-note">{report.provenance_note}</p>
   </div>;
 }
 

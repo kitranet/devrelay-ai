@@ -8,14 +8,21 @@ from uuid import uuid4
 
 from app.core.config import Settings
 from app.core.errors import (
+    PlanReviewConflictError,
     ProposalNotFoundError,
     ProposalVersionConflictError,
     ProposalSourceConflictError,
     ReviewTransitionConflictError,
 )
-from app.models.review import AuditEvent, ReviewDecisionRequest, ReviewHistoryResponse, ReviewRecord
+from app.models.review import (
+    AuditEvent, PlanReviewDecisionRequest, PlanReviewHistory, PlanReviewRecord,
+    ReviewDecisionRequest, ReviewHistoryResponse, ReviewRecord,
+)
 from app.services.proposal_generation import verify_current_source_revision
 from app.services.proposal_store import InMemoryProposalStore, InMemoryReviewStore
+from app.services.proposal_store import InMemoryTaskPlanStore
+from app.services.repository_analysis import RepositoryScanner
+from app.services.validated_plan import load_current_validated_plan, plan_evidence_references
 
 _DECISION_STATE = {
     "approve": "review_approved",
@@ -30,10 +37,14 @@ class ReviewWorkflowService:
         settings: Settings,
         proposals: InMemoryProposalStore,
         reviews: InMemoryReviewStore,
+        plans: InMemoryTaskPlanStore,
+        scanner: RepositoryScanner,
     ) -> None:
         self.settings = settings
         self.proposals = proposals
         self.reviews = reviews
+        self.plans = plans
+        self.scanner = scanner
 
     def submit(self, request: ReviewDecisionRequest) -> ReviewRecord:
         proposal = self.proposals.get(request.proposal_id)
@@ -137,4 +148,40 @@ class ReviewWorkflowService:
             current_proposal_version=proposal.version,
             reviews=self.reviews.history(proposal_id),
             audit_events=self.reviews.audit_events(proposal_id),
+        )
+
+    def submit_plan(self, request: PlanReviewDecisionRequest) -> PlanReviewRecord:
+        stored, _ = load_current_validated_plan(request.task_id, self.plans, self.scanner)
+        if request.plan_sha256 != stored.plan_digest:
+            raise PlanReviewConflictError()
+        if self.reviews.plan_history(request.task_id):
+            raise PlanReviewConflictError()
+        review_state = {
+            "acknowledge": "reviewed",
+            "request_changes": "changes_requested",
+            "reject": "rejected",
+        }[request.decision]
+        record = PlanReviewRecord(
+            review_id=uuid4(),
+            task_id=stored.plan.task_id,
+            repository_id=stored.plan.repository_id,
+            decision=request.decision,
+            review_state=review_state,
+            reviewer_identifier=request.reviewer_identifier,
+            justification=request.justification,
+            timestamp=datetime.now(timezone.utc),
+            plan_sha256=stored.plan_digest,
+            analysis_snapshot_id=stored.analysis_snapshot_id,
+            evidence_references=plan_evidence_references(stored.plan),
+            unresolved_questions=request.unresolved_questions or stored.plan.unresolved_questions,
+        )
+        return self.reviews.decide_plan(request.task_id, stored.plan_digest, record)
+
+    def plan_history(self, task_id) -> PlanReviewHistory:
+        stored, _ = load_current_validated_plan(task_id, self.plans, self.scanner)
+        records = self.reviews.plan_history(task_id)
+        return PlanReviewHistory(
+            task_id=stored.plan.task_id,
+            review_state=records[-1].review_state if records else "awaiting_review",
+            reviews=records,
         )

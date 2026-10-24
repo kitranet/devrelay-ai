@@ -5,15 +5,16 @@ from __future__ import annotations
 from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
+import json
 from threading import RLock
 from uuid import UUID
 
 from app.models.proposal import CodeChangeProposal
 from app.models.handoff import HandoffReport
 from app.models.runtime_validation import RuntimeValidationEvidence
-from app.models.review import AuditEvent, ReviewRecord
+from app.models.review import AuditEvent, PlanReviewRecord, ReviewRecord
 from app.models.task import TaskPlan
-from app.core.errors import ProposalNotFoundError, ProposalVersionConflictError, ReviewTransitionConflictError
+from app.core.errors import PlanReviewConflictError, ProposalNotFoundError, ProposalVersionConflictError, ReviewTransitionConflictError
 
 
 @dataclass(frozen=True)
@@ -42,13 +43,15 @@ class InMemoryTaskPlanStore:
         *,
         source_hashes: dict[str, str],
         analysis_snapshot_id: str,
-    ) -> None:
+    ) -> StoredTaskPlan:
         diagnostics = plan.inference_diagnostics
+        plan_digest = self.digest_plan(plan)
+        plan = plan.model_copy(update={"plan_sha256": plan_digest}, deep=True)
         record = StoredTaskPlan(
             plan=plan.model_copy(deep=True),
             source_hashes=dict(source_hashes),
             analysis_snapshot_id=analysis_snapshot_id,
-            plan_digest=self.digest_plan(plan),
+            plan_digest=plan_digest,
             validated_provider=plan.provider,
             validated_is_mock=plan.is_mock,
             validated_model=diagnostics.model if diagnostics else None,
@@ -59,6 +62,7 @@ class InMemoryTaskPlanStore:
             self._records.move_to_end(plan.task_id)
             while len(self._records) > self._max_records:
                 self._records.popitem(last=False)
+        return self.get(plan.task_id) or record
 
     def get(self, task_id: str) -> StoredTaskPlan | None:
         with self._lock:
@@ -79,7 +83,8 @@ class InMemoryTaskPlanStore:
 
     @staticmethod
     def digest_plan(plan: TaskPlan) -> str:
-        return hashlib.sha256(plan.model_dump_json().encode("utf-8")).hexdigest()
+        payload = plan.model_dump(exclude={"plan_sha256"})
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 class InMemoryProposalStore:
@@ -111,6 +116,7 @@ class InMemoryReviewStore:
         self._max_events = max_events
         self._reviews: OrderedDict[UUID, ReviewRecord] = OrderedDict()
         self._events: OrderedDict[UUID, AuditEvent] = OrderedDict()
+        self._plan_reviews: OrderedDict[UUID, PlanReviewRecord] = OrderedDict()
         self._lock = RLock()
 
     def decide(
@@ -157,6 +163,20 @@ class InMemoryReviewStore:
         with self._lock:
             return [event.model_copy(deep=True) for event in self._events.values() if event.proposal_id == proposal_id]
 
+    def decide_plan(self, task_id: UUID, expected_digest: str, review: PlanReviewRecord) -> PlanReviewRecord:
+        with self._lock:
+            current = [item for item in self._plan_reviews.values() if item.task_id == str(task_id)]
+            if current or review.plan_sha256 != expected_digest:
+                raise PlanReviewConflictError()
+            self._plan_reviews[review.review_id] = review.model_copy(deep=True)
+            while len(self._plan_reviews) > self._max_reviews:
+                self._plan_reviews.popitem(last=False)
+            return review.model_copy(deep=True)
+
+    def plan_history(self, task_id: UUID) -> list[PlanReviewRecord]:
+        with self._lock:
+            return [item.model_copy(deep=True) for item in self._plan_reviews.values() if item.task_id == str(task_id)]
+
 
 class InMemoryHandoffStore:
     """Bounded, process-local handoff artifact storage."""
@@ -177,6 +197,13 @@ class InMemoryHandoffStore:
         with self._lock:
             report = self._records.get(report_id)
             return report.model_copy(deep=True) if report else None
+
+    def get_plan_only(self, report_id: UUID):
+        with self._lock:
+            report = self._records.get(report_id)
+            if report is None or not hasattr(report, "handoff_type") or report.handoff_type != "plan_only":
+                return None
+            return report.model_copy(deep=True)
 
 
 class InMemoryRuntimeValidationStore:

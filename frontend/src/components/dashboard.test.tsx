@@ -45,14 +45,14 @@ const repositoryAnalysis = {
 };
 
 const taskPlan = {
-  task_id: "plan-test", repository_id: "planning-fixture", task_description: "Fix the division by zero defect",
+  task_id: "plan-test", plan_sha256: "a".repeat(64), repository_id: "planning-fixture", task_description: "Fix the division by zero defect",
   status: "planned", relevant_files: ["package/calculator.py", "tests/test_calculator.py"],
   source_references: [{ path: "package/calculator.py", line: 1, end_line: 2 }],
   implementation_steps: [{ step: 1, description: "Inspect division behavior and add a regression test.", source_references: [{ path: "package/calculator.py", line: 1, end_line: 2 }] }],
   expected_code_changes: [{ path: "package/calculator.py", description: "Guard zero divisor after approval." }],
   risks: ["Confirm expected zero-divisor behavior."], dependencies: [],
   validation_requirements: ["Run tests/test_calculator.py"], human_approval_required: true,
-  execution_status: "not_started", assumptions: [], unsupported_references: [], provider: "mock", is_mock: true,
+  execution_status: "not_started", assumptions: [], unsupported_references: [], source_excerpts: [], findings: [], unresolved_questions: [], provider: "mock", is_mock: true,
   inference_diagnostics: { provider: "mock", model: "devrelay-mock-v1", is_mock: true, completion_status: "completed", finish_reason: "mock_complete", model_reported_by_provider: true, latency_ms: null, usage: null },
 };
 
@@ -66,6 +66,35 @@ const liveTaskPlan = {
     latency_ms: 2431,
     usage: { input_tokens: 280, output_tokens: 192, reasoning_tokens: 72, total_tokens: 472 },
   },
+};
+
+const continuityTaskId = "550e8400-e29b-41d4-a716-446655440001";
+const continuityPlan = {
+  ...taskPlan,
+  task_id: continuityTaskId,
+  repository_id: "continuity-pipeline-fixture",
+  task_description: "Investigate the nightly continuity pipeline behavior across validation and publishing.",
+  relevant_files: ["pipeline/orchestrator.py", "pipeline/validation.py", "pipeline/output.py"],
+  source_references: [{ path: "pipeline/orchestrator.py", line: 16, end_line: 39 }],
+  implementation_steps: [{ step: 1, description: "Trace the supplied validation and publication excerpts.", source_references: [{ path: "pipeline/orchestrator.py", line: 16, end_line: 39 }] }],
+  expected_code_changes: [],
+  source_excerpts: [{ path: "pipeline/orchestrator.py", line: 16, end_line: 39, sha256: "c".repeat(64), content: "def run_pipeline():\\n    validate_batch()\\n    publish_report()" }],
+  findings: [{ classification: "observed", description: "The orchestration path calls validation before publication.", source_references: [{ path: "pipeline/orchestrator.py", line: 16, end_line: 39 }] }],
+  unresolved_questions: ["What is the expected policy when a batch is below the threshold?"],
+};
+
+const planOnlyHandoff = {
+  handoff_type: "plan_only" as const, report_id: "550e8400-e29b-41d4-a716-446655440002",
+  generated_at: "2026-10-24T00:00:00Z", repository_id: "continuity-pipeline-fixture", task_id: continuityTaskId,
+  objective: continuityPlan.task_description, plan_status: "planned" as const, planning_provider: "mock" as const,
+  planning_is_mock: true, planning_model: "devrelay-mock-v1", plan_sha256: "d".repeat(64), analysis_snapshot_id: "snapshot",
+  evidence: [{ path: "pipeline/orchestrator.py", line: 16, end_line: 39, sha256: "c".repeat(64) }],
+  findings: continuityPlan.findings, unresolved_questions: continuityPlan.unresolved_questions,
+  proposed_next_steps: continuityPlan.implementation_steps, validation_requirements: ["Add focused policy tests."],
+  risks: ["Mock output does not interpret source semantics."], assumptions: [], dependencies: [],
+  review_state: "awaiting_review" as const, human_decisions: [], human_approval_required: true as const,
+  execution_status: "not_started" as const, runtime_validation_status: "not_run" as const,
+  provenance_note: "Stored validated plan; no patch was proposed or executed.",
 };
 
 const codeProposal = {
@@ -155,6 +184,32 @@ describe("DevRelay dashboard", () => {
     expect(screen.getByText("Execution has not started")).toBeInTheDocument();
     expect(screen.getByText("Inspect division behavior and add a regression test.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/backend/api/v1/tasks/plan", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("shows source excerpts and an unreviewed plan-only handoff for the continuity fixture", async () => {
+    const fetchMock = routeFetch({
+      "api/v1/tasks/plan": continuityPlan,
+      [`api/v1/reviews/plans/${continuityTaskId}`]: { task_id: continuityTaskId, review_state: "awaiting_review", reviews: [] },
+      "api/v1/handoffs/plans": jsonResponse(planOnlyHandoff, 201),
+    }, enabledReviewStatus);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<Dashboard />);
+    await screen.findByText("FastAPI is responding");
+    await user.type(screen.getByLabelText("What needs attention?"), continuityPlan.task_description);
+    await user.click(screen.getByRole("button", { name: /generate plan/i }));
+    expect(await screen.findByText("Supplied source excerpts")).toBeInTheDocument();
+    expect(screen.getByText("pipeline/orchestrator.py:16-39", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Observed in cited source")).toBeInTheDocument();
+    expect(screen.getByText("This response was not generated by NVIDIA Nemotron.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /generate code proposal/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create plan-only handoff" }));
+    expect(await screen.findByText("Unreviewed handoff · awaiting human review")).toBeInTheDocument();
+    expect(screen.getByText("Human review required:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Execution:", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.tagName === "P" && /Execution:\s*not_started.*Runtime validation:\s*not_run/.test(element.textContent ?? ""))).toBeInTheDocument();
+    const request = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/api/v1/handoffs/plans"));
+    expect(JSON.parse(String(request?.[1]?.body))).toEqual({ task_id: continuityTaskId });
   });
 
   it("shows genuine provider identity and safe planning diagnostics for a completed live plan", async () => {

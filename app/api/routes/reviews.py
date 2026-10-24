@@ -9,7 +9,10 @@ from app.core.errors import (
     LocalReviewDisabledError, ProposalValidationError, ReviewPayloadTooLargeError,
 )
 from app.core.local_access import require_loopback
-from app.models.review import LocalReviewStatus, ReviewDecisionRequest, ReviewHistoryResponse, ReviewRecord
+from app.models.review import (
+    LocalReviewStatus, PlanReviewDecisionRequest, PlanReviewHistory, PlanReviewRecord,
+    ReviewDecisionRequest, ReviewHistoryResponse, ReviewRecord,
+)
 from app.services.review_workflow import ReviewWorkflowService
 
 router = APIRouter(prefix="/api/v1/reviews", tags=["local reviews"])
@@ -28,6 +31,8 @@ def _service(request: Request) -> ReviewWorkflowService:
         request.app.state.settings,
         request.app.state.proposal_store,
         request.app.state.review_store,
+        request.app.state.task_plan_store,
+        request.app.state.repository_scanner,
     )
 
 
@@ -72,6 +77,36 @@ async def submit_review(request: Request) -> ReviewRecord:
     except ValidationError:
         raise ProposalValidationError("Review request validation failed. Check the decision, identity label, hashes, and justification.") from None
     return _service(request).submit(payload)
+
+
+@router.post("/plans", response_model=PlanReviewRecord, status_code=201)
+async def submit_plan_review(request: Request) -> PlanReviewRecord:
+    require_loopback(request)
+    require_reviews_enabled(request)
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REVIEW_PAYLOAD_BYTES:
+                raise ReviewPayloadTooLargeError()
+        except ValueError:
+            raise ProposalValidationError("The plan review request has an invalid content length.") from None
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > MAX_REVIEW_PAYLOAD_BYTES:
+            raise ReviewPayloadTooLargeError()
+        raw.extend(chunk)
+    try:
+        payload = PlanReviewDecisionRequest.model_validate_json(bytes(raw))
+    except ValidationError:
+        raise ProposalValidationError("Plan review request validation failed. Check the decision, identity label, plan hash, and justification.") from None
+    return _service(request).submit_plan(payload)
+
+
+@router.get("/plans/{task_id}", response_model=PlanReviewHistory)
+def get_plan_review_history(task_id: UUID, request: Request) -> PlanReviewHistory:
+    require_loopback(request)
+    require_reviews_enabled(request)
+    return _service(request).plan_history(task_id)
 
 
 @router.get("/{proposal_id}", response_model=ReviewHistoryResponse)

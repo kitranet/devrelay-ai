@@ -50,7 +50,41 @@ class MockModelProvider:
         except (json.JSONDecodeError, KeyError, TypeError):
             return MockModelProvider._unsupported_plan()
 
-        if "division by zero" in task:
+        if "continuity pipeline" in task or ("nightly pipeline" in task and "investigat" in task):
+            excerpts = context.get("source_excerpts", [])
+            files = list(dict.fromkeys(
+                excerpt.get("path") for excerpt in excerpts
+                if isinstance(excerpt, dict) and isinstance(excerpt.get("path"), str)
+            ))[:5]
+            selected_refs = [
+                {"path": excerpt["path"], "line": excerpt["line"], "end_line": excerpt["end_line"]}
+                for excerpt in excerpts[:5]
+                if isinstance(excerpt, dict) and excerpt.get("path") in files
+            ]
+            if len(files) < 3 or not selected_refs:
+                return MockModelProvider._unsupported_plan()
+            steps = [
+                "Trace the supplied ingestion, validation, transformation, orchestration, and publishing excerpts as one data flow.",
+                "Separate behavior directly visible in the excerpts from hypotheses, and list policy questions for the maintainer.",
+                "Define regression cases for the agreed acceptance policy before proposing any implementation change.",
+            ]
+            return json.dumps({
+                "status": "planned",
+                "relevant_files": files,
+                "source_references": selected_refs,
+                "implementation_steps": [
+                    {"step": index, "description": text, "source_references": selected_refs[:2]}
+                    for index, text in enumerate(steps, start=1)
+                ],
+                "expected_code_changes": [],
+                "risks": ["This deterministic mock does not interpret source behavior; review the excerpts before drawing conclusions."],
+                "dependencies": [],
+                "validation_requirements": ["After policy is agreed, add focused tests for accepted and rejected batch outcomes."],
+                "assumptions": ["No repository tests were executed by planning."],
+                "findings": [],
+                "unresolved_questions": ["What should happen when a batch is below the configured validity threshold?"],
+            })
+        elif "division by zero" in task:
             files = ["package/calculator.py", "tests/test_calculator.py"]
             steps = [
                 "Inspect the division operation and its current edge-case behavior.",
@@ -99,6 +133,8 @@ class MockModelProvider:
             "dependencies": [],
             "validation_requirements": [f"Run {path}" for path in files if path.startswith("tests/")],
             "assumptions": [],
+            "findings": [],
+            "unresolved_questions": [],
         })
 
     @staticmethod

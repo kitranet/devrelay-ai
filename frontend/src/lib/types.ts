@@ -15,6 +15,8 @@ export type SourceReference = {
   end_line: number | null;
 };
 
+export type SourceExcerpt = SourceReference & { end_line: number; sha256: string; content: string };
+
 export type RepositoryAnalysis = {
   summary: {
     repository_id: string;
@@ -49,6 +51,7 @@ export type RepositoryAnalysis = {
 
 export type TaskPlan = {
   task_id: string;
+  plan_sha256: string | null;
   repository_id: string;
   task_description: string;
   status: "planned" | "insufficient_context" | "unsupported";
@@ -67,6 +70,9 @@ export type TaskPlan = {
   execution_status: "not_started";
   assumptions: string[];
   unsupported_references: string[];
+  source_excerpts: SourceExcerpt[];
+  findings: { classification: "observed" | "suspected"; description: string; source_references: SourceReference[] }[];
+  unresolved_questions: string[];
   provider: "nebius" | "mock";
   is_mock: boolean;
   inference_diagnostics?: {
@@ -119,6 +125,17 @@ export type LocalReviewStatus = {
 };
 
 export type ReviewDecision = "approve" | "reject" | "request_changes";
+export type PlanReviewDecision = "acknowledge" | "request_changes" | "reject";
+export type PlanReviewState = "awaiting_review" | "reviewed" | "changes_requested" | "rejected";
+export type PlanReviewRecord = {
+  review_id: string; task_id: string; repository_id: string;
+  decision: "acknowledge" | "request_changes" | "reject";
+  review_state: Exclude<PlanReviewState, "awaiting_review">;
+  reviewer_identifier: string; reviewer_identity_status: "unverified_local_development";
+  justification: string; timestamp: string; plan_sha256: string; analysis_snapshot_id: string;
+  evidence_references: SourceReference[]; unresolved_questions: string[];
+};
+export type PlanReviewHistory = { task_id: string; review_state: PlanReviewState; reviews: PlanReviewRecord[] };
 
 export type ReviewRecord = {
   review_id: string;
@@ -249,6 +266,19 @@ export type HandoffReport = {
   next_engineer_actions: { action: string; required_approval: boolean; status: "pending" }[];
   provenance_note: string;
   provider: "mock"; is_mock: true;
+};
+
+export type PlanOnlyHandoffReport = {
+  handoff_type: "plan_only"; report_id: string; generated_at: string; repository_id: string;
+  task_id: string; objective: string; plan_status: "planned"; planning_provider: "nebius" | "mock";
+  planning_is_mock: boolean; planning_model: string | null; plan_sha256: string; analysis_snapshot_id: string;
+  evidence: (SourceReference & { sha256: string })[];
+  findings: TaskPlan["findings"]; unresolved_questions: string[];
+  proposed_next_steps: TaskPlan["implementation_steps"];
+  validation_requirements: string[]; risks: string[]; assumptions: string[]; dependencies: string[];
+  review_state: PlanReviewState; human_decisions: PlanReviewRecord[];
+  human_approval_required: true; execution_status: "not_started"; runtime_validation_status: "not_run";
+  provenance_note: string;
 };
 
 export type ApiError = { error?: { code?: string; message?: string } };

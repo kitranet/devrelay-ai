@@ -8,6 +8,7 @@ import json
 import configparser
 import os
 import re
+import stat
 import time
 import tomllib
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ from app.models.repository import (
     RepositoryFunction,
     RepositoryModule,
     RepositorySummary,
+    SourceExcerpt,
     SourceReference,
 )
 
@@ -64,6 +66,11 @@ _CONFIG_NAMES = {
     "docker-compose.yml",
 }
 _MAX_WARNINGS = 1_000
+_SOURCE_SECRET_LIKE = re.compile(
+    r"(?i)(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
+    r"(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+|"
+    r"nvapi-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})"
+)
 
 
 def _is_sensitive_filename(name: str) -> bool:
@@ -413,6 +420,93 @@ class RepositoryScanner:
             warnings=sorted(warnings, key=lambda item: (item.path or "", item.line or 0, item.code)),
             snapshot_id=snapshot_id,
             content_hashes=content_hashes,
+        )
+
+    def read_source_excerpt(
+        self,
+        repository_id: str,
+        analysis: RepositoryAnalysisResponse,
+        reference: SourceReference,
+        *,
+        max_chars: int,
+        max_lines: int,
+    ) -> SourceExcerpt | None:
+        """Read one exact AST range only if it still matches the authorized scan."""
+        raw_path = reference.path
+        if (
+            analysis.summary.repository_id != repository_id
+            or not raw_path
+            or "\\" in raw_path
+            or raw_path.startswith("/")
+            or ":" in raw_path
+            or any(part in {"", ".", ".."} for part in raw_path.split("/"))
+        ):
+            return None
+        expected_hash = analysis.content_hashes.get(raw_path)
+        file_record = next((item for item in analysis.files if item.path == raw_path), None)
+        if not expected_hash or file_record is None or file_record.category != "python":
+            return None
+        if reference.end_line is None or reference.end_line < reference.line:
+            return None
+        if reference.end_line - reference.line + 1 > max_lines:
+            return None
+        analyzed_ranges = {
+            (item.source.path, item.source.line, item.source.end_line)
+            for item in analysis.functions + analysis.classes
+        }
+        if (reference.path, reference.line, reference.end_line) not in analyzed_ranges:
+            return None
+
+        configured_root = self.settings.authorized_repositories.get(repository_id)
+        if configured_root is None:
+            return None
+        try:
+            root = configured_root.resolve(strict=True)
+            candidate = root.joinpath(*raw_path.split("/"))
+            current = root
+            for part in raw_path.split("/"):
+                current = current / part
+                if current.is_symlink() or (hasattr(current, "is_junction") and current.is_junction()):
+                    return None
+            resolved = candidate.resolve(strict=True)
+            if not resolved.is_relative_to(root):
+                return None
+            before = resolved.stat()
+            if not stat.S_ISREG(before.st_mode) or before.st_size > self.settings.repository_max_file_size_bytes:
+                return None
+            with resolved.open("rb") as stream:
+                raw = stream.read(self.settings.repository_max_file_size_bytes + 1)
+            after = resolved.stat()
+        except (OSError, RuntimeError):
+            return None
+        if (
+            (before.st_ino, before.st_size, before.st_mtime_ns)
+            != (after.st_ino, after.st_size, after.st_mtime_ns)
+            or len(raw) > self.settings.repository_max_file_size_bytes
+            or hashlib.sha256(raw).hexdigest() != expected_hash
+        ):
+            return None
+        if b"\x00" in raw:
+            return None
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeError:
+            return None
+        configured_key = self.settings.nebius_api_key.get_secret_value() if self.settings.nebius_api_key else None
+        if _SOURCE_SECRET_LIKE.search(text) or (configured_key and configured_key in text):
+            return None
+        lines = text.splitlines()
+        if reference.end_line > len(lines):
+            return None
+        content = "\n".join(lines[reference.line - 1:reference.end_line])
+        if not content or len(content) > max_chars:
+            return None
+        return SourceExcerpt(
+            path=raw_path,
+            line=reference.line,
+            end_line=reference.end_line,
+            sha256=expected_hash,
+            content=content,
         )
 
     @staticmethod

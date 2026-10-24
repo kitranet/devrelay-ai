@@ -8,8 +8,9 @@ from pydantic import BaseModel, Field
 
 from app.models.proposal import ProposalTargetFile, ProposalValidationFinding
 from app.models.repository import RepositoryModule, RepositorySummary, SourceReference
-from app.models.review import ReviewRecord
+from app.models.review import PlanReviewRecord, PlanReviewState, ReviewRecord
 from app.models.runtime_validation import RuntimeValidationStatus
+from app.models.task import PlanFinding, PlanStep
 
 
 class HandoffTaskContext(BaseModel):
@@ -99,3 +100,43 @@ class HandoffReport(BaseModel):
     provenance_note: str = Field(min_length=1, max_length=500)
     provider: Literal["mock"]
     is_mock: Literal[True]
+
+
+class PlanHandoffReportRequest(BaseModel):
+    task_id: UUID
+
+
+class PlanHandoffEvidence(BaseModel):
+    path: str
+    line: int = Field(ge=1)
+    end_line: int | None = Field(default=None, ge=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class PlanOnlyHandoffReport(BaseModel):
+    handoff_type: Literal["plan_only"] = "plan_only"
+    report_id: UUID
+    generated_at: datetime
+    repository_id: str
+    task_id: str
+    objective: str
+    plan_status: Literal["planned"]
+    planning_provider: Literal["nebius", "mock"]
+    planning_is_mock: bool
+    planning_model: str | None = None
+    plan_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    analysis_snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence: list[PlanHandoffEvidence] = Field(max_length=20)
+    findings: list[PlanFinding] = Field(max_length=6)
+    unresolved_questions: list[str] = Field(max_length=6)
+    proposed_next_steps: list[PlanStep] = Field(max_length=4)
+    validation_requirements: list[str] = Field(max_length=4)
+    risks: list[str] = Field(max_length=4)
+    assumptions: list[str] = Field(max_length=3)
+    dependencies: list[str] = Field(max_length=4)
+    review_state: PlanReviewState
+    human_decisions: list[PlanReviewRecord] = Field(max_length=1)
+    human_approval_required: Literal[True] = True
+    execution_status: Literal["not_started"] = "not_started"
+    runtime_validation_status: Literal["not_run"] = "not_run"
+    provenance_note: str = Field(min_length=1, max_length=500)

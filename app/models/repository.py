@@ -30,6 +30,16 @@ class SourceReference(BaseModel):
     end_line: int | None = Field(default=None, ge=1)
 
 
+class SourceExcerpt(BaseModel):
+    """A bounded, hash-bound source fragment supplied as untrusted evidence."""
+
+    path: str
+    line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content: str = Field(min_length=1, max_length=2_400)
+
+
 class RepositoryFunction(BaseModel):
     name: str
     qualified_name: str

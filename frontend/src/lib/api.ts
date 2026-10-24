@@ -1,4 +1,4 @@
-import type { ApiError, CodeChangeProposal, HandoffReport, HealthResponse, InferenceStatus, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, ReviewRecord, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
+import type { ApiError, CodeChangeProposal, HandoffReport, HealthResponse, InferenceStatus, LocalReviewStatus, PlanOnlyHandoffReport, PlanReviewDecision, PlanReviewHistory, PlanReviewRecord, RepositoryAnalysis, ReviewDecision, ReviewHistory, ReviewRecord, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -77,8 +77,22 @@ export const submitReview = (input: {
 export const getReviewHistory = (proposalId: string) =>
   requestJson<ReviewHistory>(`api/v1/reviews/${encodeURIComponent(proposalId)}`);
 
+export const submitPlanReview = (input: {
+  task_id: string; plan_sha256: string; decision: PlanReviewDecision;
+  reviewer_identifier: string; justification: string; unresolved_questions: string[];
+}) => requestJson<PlanReviewRecord>("api/v1/reviews/plans", { method: "POST", body: JSON.stringify(input) });
+
+export const getPlanReviewHistory = (taskId: string) =>
+  requestJson<PlanReviewHistory>(`api/v1/reviews/plans/${encodeURIComponent(taskId)}`);
+
 export const generateHandoff = (proposalId: string) =>
   requestJson<HandoffReport>("api/v1/handoffs", { method: "POST", body: JSON.stringify({ proposal_id: proposalId }) });
+
+export const generatePlanOnlyHandoff = (taskId: string) =>
+  requestJson<PlanOnlyHandoffReport>("api/v1/handoffs/plans", { method: "POST", body: JSON.stringify({ task_id: taskId }) });
+
+export const getPlanOnlyHandoff = (reportId: string) =>
+  requestJson<PlanOnlyHandoffReport>(`api/v1/handoffs/plans/${encodeURIComponent(reportId)}`);
 
 export const getHandoff = (reportId: string) =>
   requestJson<HandoffReport>(`api/v1/handoffs/${encodeURIComponent(reportId)}`);

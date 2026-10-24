@@ -9,7 +9,9 @@ const ROUTES = new Map<string, { method: "GET" | "POST"; upstream: string }>([
   ["api/v1/proposals/create", { method: "POST", upstream: "/api/v1/proposals/create" }],
   ["api/v1/reviews/status", { method: "GET", upstream: "/api/v1/reviews/status" }],
   ["api/v1/reviews", { method: "POST", upstream: "/api/v1/reviews" }],
+  ["api/v1/reviews/plans", { method: "POST", upstream: "/api/v1/reviews/plans" }],
   ["api/v1/handoffs", { method: "POST", upstream: "/api/v1/handoffs" }],
+  ["api/v1/handoffs/plans", { method: "POST", upstream: "/api/v1/handoffs/plans" }],
   ["api/v1/runtime-validation/readiness", { method: "GET", upstream: "/api/v1/runtime-validation/readiness" }],
   ["api/v1/runtime-validation", { method: "POST", upstream: "/api/v1/runtime-validation" }],
 ]);
@@ -25,9 +27,12 @@ async function proxy(request: NextRequest, context: RouteContext) {
   if (access) return access;
   const { path } = await context.params;
   const pathKey = path.join("/");
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const route = ROUTES.get(pathKey) ?? (
-    request.method === "GET" && path.length === 4 && path[0] === "api" && path[1] === "v1" &&
-    ["reviews", "handoffs", "runtime-validation"].includes(path[2]) && /^[0-9a-f-]{36}$/i.test(path[3])
+    request.method === "GET" && path[0] === "api" && path[1] === "v1" && (
+      (path.length === 4 && ["reviews", "handoffs", "runtime-validation"].includes(path[2]) && uuid.test(path[3])) ||
+      (path.length === 5 && ["reviews", "handoffs"].includes(path[2]) && path[3] === "plans" && uuid.test(path[4]))
+    )
       ? { method: "GET" as const, upstream: `/${pathKey}` }
       : undefined
   );

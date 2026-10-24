@@ -15,7 +15,10 @@ from app.models.handoff import (
     HandoffTaskContext,
     HandoffTechnicalUnderstanding,
     HandoffValidationRisk,
+    PlanHandoffEvidence,
+    PlanOnlyHandoffReport,
 )
+from app.services.validated_plan import load_current_validated_plan, plan_evidence_references
 from app.services.proposal_generation import verify_current_source_revision
 from app.services.proposal_store import (
     InMemoryHandoffStore,
@@ -191,6 +194,53 @@ class HandoffReportService:
             ),
             provider="mock",
             is_mock=True,
+        )
+        self.reports.put(report)
+        return report
+
+    def generate_plan_only(self, task_id) -> PlanOnlyHandoffReport:
+        stored, analysis = load_current_validated_plan(task_id, self.plans, self.scanner)
+        plan = stored.plan
+        decisions = self.reviews.plan_history(task_id)
+        review_state = decisions[-1].review_state if decisions else "awaiting_review"
+        evidence = [
+            PlanHandoffEvidence(
+                path=reference.path,
+                line=reference.line,
+                end_line=reference.end_line,
+                sha256=analysis.content_hashes[reference.path],
+            )
+            for reference in plan_evidence_references(plan)
+            if reference.path in analysis.content_hashes
+        ]
+        report = PlanOnlyHandoffReport(
+            report_id=uuid4(),
+            generated_at=datetime.now(timezone.utc),
+            repository_id=plan.repository_id,
+            task_id=plan.task_id,
+            objective=plan.task_description,
+            plan_status="planned",
+            planning_provider=stored.validated_provider,
+            planning_is_mock=stored.validated_is_mock,
+            planning_model=stored.validated_model,
+            plan_sha256=stored.plan_digest,
+            analysis_snapshot_id=stored.analysis_snapshot_id,
+            evidence=evidence,
+            findings=plan.findings,
+            unresolved_questions=plan.unresolved_questions,
+            proposed_next_steps=plan.implementation_steps,
+            validation_requirements=plan.validation_requirements,
+            risks=plan.risks,
+            assumptions=plan.assumptions,
+            dependencies=plan.dependencies,
+            review_state=review_state,
+            human_decisions=decisions[-1:],
+            provenance_note=(
+                "This plan-only handoff is built from a server-stored validated plan and the current matching static-analysis "
+                f"snapshot. Planning provider: {stored.validated_provider}; mock={stored.validated_is_mock}. "
+                "Review labels are unverified local-development identities. No patch was proposed, applied, or executed; "
+                "runtime validation is not_run."
+            ),
         )
         self.reports.put(report)
         return report

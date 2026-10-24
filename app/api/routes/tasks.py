@@ -16,9 +16,9 @@ async def plan_task(payload: TaskPlanningRequest, request: Request) -> TaskPlan:
         request.app.state.inference_service,
     )
     result = await service.plan_with_provenance(payload)
-    request.app.state.task_plan_store.put_validated(
+    stored = request.app.state.task_plan_store.put_validated(
         result.plan,
         source_hashes=result.source_hashes,
         analysis_snapshot_id=result.analysis_snapshot_id,
     )
-    return result.plan
+    return stored.plan

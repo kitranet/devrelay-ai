@@ -152,6 +152,22 @@ class TaskPlanNotFoundError(ApplicationError):
         super().__init__("The task plan is not available in this application session.")
 
 
+class TaskPlanSourceConflictError(ApplicationError):
+    status_code = 409
+    code = "task_plan_source_stale"
+
+    def __init__(self) -> None:
+        super().__init__("The authorized repository changed after this task plan was validated.")
+
+
+class PlanReviewConflictError(ApplicationError):
+    status_code = 409
+    code = "plan_review_conflict"
+
+    def __init__(self) -> None:
+        super().__init__("The plan changed or already has a human review decision.")
+
+
 class ProposalNotFoundError(ApplicationError):
     status_code = 404
     code = "proposal_not_found"
