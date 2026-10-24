@@ -18,6 +18,21 @@ uvicorn app.main:app --reload
 
 The API runs at `http://127.0.0.1:8000`; health is at `/health`, and interactive API documentation is at `/docs`.
 
+## Local dashboard authentication
+
+The Next.js dashboard now fails closed unless its server process has a username, password, and exact origin configured. For a local run at `http://127.0.0.1:3000`, use PowerShell's secure credential prompt before starting Next.js; do not save these example values in source control:
+
+```powershell
+$demoCredential = Get-Credential -UserName 'local-judge' -Message 'Choose a temporary local dashboard password'
+$env:DEMO_AUTH_USERNAME = $demoCredential.UserName
+$env:DEMO_AUTH_PASSWORD = $demoCredential.GetNetworkCredential().Password
+$env:DEMO_AUTH_ORIGIN = 'http://127.0.0.1:3000'
+Set-Location C:\devrelay-ai\frontend
+npm.cmd run dev -- --hostname 127.0.0.1 --port 3000
+```
+
+Open the exact configured origin and authenticate when the browser challenges. Keep the backend bound to loopback too. Clear these process variables after stopping the frontend. For public judging use the HTTPS deployment guide; do not use this local command as a public deployment.
+
 ## Configuration
 
 Set values in the local, git-ignored `.env` file or the process environment. `NEBIUS_API_KEY` is optional until inference is requested. Never commit `.env` or paste credentials into source code or logs.
@@ -27,6 +42,9 @@ Set values in the local, git-ignored `.env` file or the process environment. `NE
 | `NEBIUS_BASE_URL` | `https://api.tokenfactory.nebius.com/v1/` | HTTPS Nebius Token Factory API base; only `api.tokenfactory[.<region>].nebius.com` hosts are accepted |
 | `NEBIUS_MODEL` | `nvidia/Nemotron-3_5-Lightning` | Model identifier |
 | `NEBIUS_API_KEY` | unset | Runtime API key for inference |
+| `NEBIUS_LIVE_INFERENCE_ENABLED` | `false` | Independent operator kill switch; must be enabled in addition to explicitly selecting `INFERENCE_PROVIDER=nebius` |
+| `NEBIUS_TOTAL_INFERENCE_QUOTA` | `0` | Initial durable request allowance, consumed only when the SQLite database is first created; use the local admin CLI for later changes |
+| `NEBIUS_QUOTA_DB_PATH` | `.devrelay-state/nebius-quota.sqlite3` | Durable SQLite request counter; keep outside tracked source and restrict filesystem permissions |
 | `NEBIUS_PLANNING_DISABLE_THINKING` | `false` | Opt in to pass `chat_template_kwargs.enable_thinking=false` through Token Factory `extra_body` for task planning with `nvidia/Nemotron-3_5-Lightning`; NVIDIA documents the control for this model, while live hosted behavior remains unverified |
 | `NEBIUS_TIMEOUT_SECONDS` | `30` | Per-request timeout; range 0–600 (exclusive of 0) |
 | `NEBIUS_MAX_OUTPUT_TOKENS` | `1024` | Maximum completion token budget per request |
@@ -52,7 +70,7 @@ For example, configure a repository root in PowerShell with:
 $env:AUTHORIZED_REPOSITORIES = '{"devrelay":"C:/DevRelay-AI"}'
 ```
 
-The scanner accepts only the configured ID (`devrelay`) in API requests. It never accepts a client-provided path. Keep this API bound to a trusted local interface; this phase does not implement user authentication or multi-user authorization.
+The scanner accepts only the configured ID (`devrelay`) in API requests. It never accepts a client-provided path. Do not expose the API directly; use the authenticated HTTPS gateway described in [deployment.md](deployment.md).
 
 The analysis route is `POST http://127.0.0.1:8000/api/v1/repositories/analyze` with JSON body `{"repository_id":"devrelay"}`. It returns summary counts, repository-relative file and symbol references, imports, dependency manifests, test/config/README paths, and sanitized warnings. It does not read environment files, credentials, SSH keys, or secret directories, and it skips all symlinks and common generated/binary content. It parses Python with `ast` without importing or executing it. File count, individual and aggregate size, depth, and processing time are bounded.
 

@@ -24,7 +24,10 @@ def test_mock_provider_is_selected_explicitly_and_is_deterministic_without_crede
 
 
 def test_nebius_failure_does_not_fall_back_to_mock():
-    service = build_inference_service(Settings(_env_file=None, inference_provider="nebius", nebius_api_key=None))
+    service = build_inference_service(Settings(
+        _env_file=None, inference_provider="nebius", nebius_api_key=None,
+        nebius_live_inference_enabled=True,
+    ))
     request = InferenceRequest(messages=[ChatMessage(role="user", content="mock://health")])
 
     async def generate():

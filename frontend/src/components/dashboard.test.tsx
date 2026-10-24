@@ -24,7 +24,7 @@ const disabledSandboxReadiness = {
 function routeFetch(responses: Record<string, unknown | Response>, reviewStatus = disabledReviewStatus, sandboxReadiness: SandboxReadiness = disabledSandboxReadiness) {
   return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>((input) => {
     const key = String(input).replace("/api/backend/", "");
-    const value = key === "health" ? { status: "ok" } : key === "api/v1/reviews/status" ? reviewStatus : key === "api/v1/runtime-validation/readiness" ? sandboxReadiness : responses[key];
+    const value = key === "health" ? { status: "ok" } : key === "api/v1/inference/status" ? { provider: "mock", live_inference_enabled: false, credentials_configured: false, quota_status: "not_applicable", quota_total: null, quota_used: null, quota_remaining: null } : key === "api/v1/reviews/status" ? reviewStatus : key === "api/v1/runtime-validation/readiness" ? sandboxReadiness : responses[key];
     return Promise.resolve(value instanceof Response ? value : jsonResponse(value ?? {}));
   });
 }
@@ -108,6 +108,7 @@ describe("DevRelay dashboard", () => {
     expect(screen.getByRole("heading", { name: /repository intelligence/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /engineering task planner/i })).toBeInTheDocument();
     expect(await screen.findByText("FastAPI is responding")).toBeInTheDocument();
+    expect(await screen.findByText("Live inference disabled; deterministic mock, no external model calls.")).toBeInTheDocument();
     expect(screen.getByText("Safe code proposals")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
   });

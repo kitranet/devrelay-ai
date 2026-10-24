@@ -161,9 +161,12 @@ activemq-data/
 credentials/
 secrets/
 .venv
+.devrelay-state/
 env/
 venv/
 ENV/
+!deploy/env/
+!deploy/env/*.env.example
 env.bak/
 venv.bak/
 

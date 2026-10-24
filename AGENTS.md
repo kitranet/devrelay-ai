@@ -30,3 +30,6 @@
 - Never execute repository code on the host. The configured production executor must fail closed unless all sandbox checks pass; there is no host fallback. Never claim a test passed from a fake executor or `sandbox_unavailable` evidence.
 - Runtime evidence and one-use reservations are bounded process-local prototype data, not durable audit records. Sanitize and bound logs, redact secrets/absolute paths, and verify cleanup before a successful result.
 - Preserve the current status honestly: no trusted sandbox launcher or verified immutable local image is configured in this checkout. Do not enable runtime execution or claim sandbox readiness until a separately reviewed executor actually enforces the required isolation controls.
+- Public demo routes must remain behind the server-side Next.js access gate and HTTPS edge; keep frontend/backend listeners on loopback and do not trust forwarded identity headers.
+- Live Nebius calls require both explicit provider selection and `NEBIUS_LIVE_INFERENCE_ENABLED=true`. Reserve a durable SQLite request allowance before sending; fail closed if quota storage is unavailable. Quotas are request-count controls, not dollar caps.
+- Never forward browser Basic Auth credentials to FastAPI, expose auth values through `NEXT_PUBLIC_*`, or include them in logs/assets. Keep the demo origin check on all unsafe browser methods.

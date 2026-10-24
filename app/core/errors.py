@@ -27,7 +27,23 @@ class LiveInferenceDisabledError(ApplicationError):
     code = "live_inference_disabled"
 
     def __init__(self) -> None:
-        super().__init__("Live inference requires explicit INFERENCE_PROVIDER=nebius opt-in.")
+        super().__init__("Live Nebius inference is disabled by the operator kill switch.")
+
+
+class InferenceQuotaExceededError(ApplicationError):
+    status_code = 429
+    code = "inference_quota_exhausted"
+
+    def __init__(self) -> None:
+        super().__init__("The configured live inference request allowance is exhausted.")
+
+
+class InferenceQuotaUnavailableError(ApplicationError):
+    status_code = 503
+    code = "inference_quota_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("Live inference is unavailable because request accounting could not be verified.")
 
 
 class ModelTimeoutError(ApplicationError):

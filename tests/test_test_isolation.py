@@ -28,10 +28,13 @@ def test_fake_api_key_alone_keeps_the_default_provider_mock(monkeypatch):
 
 
 def test_nebius_environment_override_with_fake_key_is_blocked_and_not_retried(
-    monkeypatch, caplog
+    monkeypatch, caplog, tmp_path
 ):
     monkeypatch.setenv("INFERENCE_PROVIDER", "nebius")
     monkeypatch.setenv("NEBIUS_API_KEY", "fake-production-key-for-test-only")
+    monkeypatch.setenv("NEBIUS_LIVE_INFERENCE_ENABLED", "true")
+    monkeypatch.setenv("NEBIUS_TOTAL_INFERENCE_QUOTA", "1")
+    monkeypatch.setenv("NEBIUS_QUOTA_DB_PATH", str(tmp_path / "quota.sqlite3"))
     get_settings.cache_clear()
 
     settings = get_settings()

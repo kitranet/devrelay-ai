@@ -17,6 +17,8 @@ from app.core.errors import (
 )
 from app.integrations.nebius import NebiusClient, estimate_prompt_tokens
 from app.models.inference import ChatMessage
+from app.services.inference_quota import InMemoryInferenceQuota
+from app.core.errors import InferenceQuotaExceededError
 
 
 def _settings(**values):
@@ -25,9 +27,15 @@ def _settings(**values):
         "inference_provider": "nebius",
         "nebius_base_url": "https://api.tokenfactory.nebius.com/v1/",
         "nebius_model": "nvidia/Nemotron-3_5-Lightning",
+        "nebius_live_inference_enabled": True,
+        "nebius_total_inference_quota": 100,
     }
     safe_values.update(values)
     return Settings(_env_file=None, **safe_values)
+
+
+def _client(settings, http_client=None):
+    return NebiusClient(settings, http_client, InMemoryInferenceQuota(settings.nebius_total_inference_quota))
 
 
 def _response(*, content="{\"status\":\"unsupported\"}", finish_reason="stop", model="nvidia/Nemotron-3_5-Lightning", usage=None):
@@ -60,7 +68,7 @@ def test_successful_response_uses_configured_endpoint_model_and_safe_metadata():
             })
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-            result = await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            result = await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
         return result, seen
 
     result, seen = asyncio.run(run())
@@ -85,7 +93,7 @@ def test_thinking_control_is_added_only_when_explicitly_enabled():
             return _response()
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-            client = NebiusClient(_settings(), http_client)
+            client = _client(_settings(), http_client)
             messages = [ChatMessage(role="user", content="Return a compact JSON object.")]
             await client.complete(messages)
             await client.complete(messages, disable_thinking=True)
@@ -111,7 +119,7 @@ def test_thinking_control_rejects_non_lightning_model_before_request():
         requests = []
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: requests.append(request) or _response())) as http_client:
-            client = NebiusClient(_settings(nebius_model="nvidia/other-model"), http_client)
+            client = _client(_settings(nebius_model="nvidia/other-model"), http_client)
             with pytest.raises(ModelProviderError, match="only enabled for the configured Nemotron"):
                 await client.complete([ChatMessage(role="user", content="hello")], disable_thinking=True)
         return requests
@@ -128,7 +136,7 @@ def test_provider_rejection_of_thinking_control_is_not_retried_or_leaked(caplog)
             return httpx.Response(400, text="unsupported chat_template_kwargs unit-test-key")
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-            client = NebiusClient(_settings(), http_client)
+            client = _client(_settings(), http_client)
             with pytest.raises(ModelProviderError, match="HTTP 400") as error:
                 await client.complete([ChatMessage(role="user", content="hello")], disable_thinking=True)
         return requests, error.value
@@ -148,11 +156,32 @@ def test_provider_default_does_not_make_paid_calls_and_missing_key_is_rejected(m
         assert client.settings.inference_provider == "mock"
         with pytest.raises(LiveInferenceDisabledError):
             await client.complete([ChatMessage(role="user", content="hello")])
-        missing = NebiusClient(Settings(_env_file=None, inference_provider="nebius"))
+        missing = NebiusClient(Settings(_env_file=None, inference_provider="nebius", nebius_live_inference_enabled=True))
         with pytest.raises(MissingCredentialsError):
             await missing.complete([ChatMessage(role="user", content="hello")])
 
     asyncio.run(run())
+
+
+def test_live_kill_switch_and_exhausted_quota_block_before_transport():
+    async def run():
+        calls = []
+        transport = httpx.MockTransport(lambda request: calls.append(request) or _response())
+        async with httpx.AsyncClient(transport=transport) as http_client:
+            disabled = _client(_settings(nebius_live_inference_enabled=False), http_client)
+            with pytest.raises(LiveInferenceDisabledError):
+                await disabled.complete([ChatMessage(role="user", content="hello")])
+
+            quota = InMemoryInferenceQuota(1)
+            client = NebiusClient(_settings(), http_client, quota)
+            await client.complete([ChatMessage(role="user", content="hello")])
+            with pytest.raises(InferenceQuotaExceededError):
+                await client.complete([ChatMessage(role="user", content="hello")])
+        return calls, quota
+
+    calls, quota = asyncio.run(run())
+    assert len(calls) == 1
+    assert quota.snapshot().used == 1
 
 
 @pytest.mark.parametrize("content", ["", '{"partial secret answer":'])
@@ -162,7 +191,7 @@ def test_truncated_response_is_rejected_without_exposing_partial_content(content
             content=content, finish_reason="length",
             usage={"prompt_tokens": 28, "completion_tokens": 128, "reasoning_tokens": 128, "total_tokens": 156},
         ))) as http_client:
-            return await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            return await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     with pytest.raises(ModelIncompleteResponseError):
         asyncio.run(run())
@@ -180,7 +209,7 @@ def test_truncated_response_is_rejected_without_exposing_partial_content(content
 def test_missing_or_malformed_provider_fields_are_sanitized(body):
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body))) as http_client:
-            await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     with pytest.raises(MalformedModelResponseError):
         asyncio.run(run())
@@ -189,11 +218,11 @@ def test_missing_or_malformed_provider_fields_are_sanitized(body):
 def test_empty_response_is_distinct_and_null_usage_is_safe():
     async def run_empty():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _response(content="   "))) as http_client:
-            await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     async def run_null_usage():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _response(model="unit-test-key", usage=None))) as http_client:
-            return await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            return await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     with pytest.raises(ModelEmptyResponseError):
         asyncio.run(run_empty())
@@ -208,7 +237,7 @@ def test_provider_echo_of_key_is_never_returned_or_logged(caplog):
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _response(
             content='{"status":"planned","risks":["unit-test-key"]}',
         ))) as http_client:
-            await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     with pytest.raises(MalformedModelResponseError):
         asyncio.run(run())
@@ -225,7 +254,7 @@ def test_credential_like_configured_model_is_rejected_before_request_or_logging(
             return _response()
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-            client = NebiusClient(_settings(nebius_model="unit-test-key"), http_client)
+            client = _client(_settings(nebius_model="unit-test-key"), http_client)
             with pytest.raises(ModelProviderError, match="model identifier is invalid"):
                 await client.complete([ChatMessage(role="user", content="hello")])
         assert not sent
@@ -239,7 +268,7 @@ def test_tagged_internal_reasoning_is_rejected_and_not_returned(caplog):
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _response(
             content='{"status":"unsupported","risks":["<think>private internal reasoning</think>"]}',
         ))) as http_client:
-            await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     with pytest.raises(MalformedModelResponseError):
         asyncio.run(run())
@@ -257,7 +286,7 @@ def test_timeout_and_http_error_are_distinct_and_never_retry(caplog):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
             with pytest.raises(ModelTimeoutError):
-                await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+                await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
         assert count == 1
 
     async def run_http_error():
@@ -270,7 +299,7 @@ def test_timeout_and_http_error_are_distinct_and_never_retry(caplog):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
             with pytest.raises(ModelProviderError, match="HTTP 429") as error:
-                await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+                await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
         assert count == 1
         assert "provider body" not in str(error.value)
         assert "unit-test-key" not in str(error.value)
@@ -290,7 +319,7 @@ def test_prompt_output_and_in_flight_limits_reject_before_sending():
             return _response()
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-            client = NebiusClient(_settings(nebius_max_prompt_tokens=256), http_client)
+            client = _client(_settings(nebius_max_prompt_tokens=256), http_client)
             large = [ChatMessage(role="user", content="x" * 2_000)]
             assert estimate_prompt_tokens(large, client.settings.nebius_model) > 256
             with pytest.raises(InferenceLimitError, match="prompt"):
@@ -311,7 +340,7 @@ def test_prompt_output_and_in_flight_limits_reject_before_sending():
 def test_unexpected_finish_reason_is_not_accepted():
     async def run():
         async with httpx.AsyncClient(transport=httpx.MockTransport(lambda _: _response(finish_reason="content_filter"))) as http_client:
-            await NebiusClient(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
+            await _client(_settings(), http_client).complete([ChatMessage(role="user", content="hello")])
 
     with pytest.raises(ModelProviderError, match="successfully completed"):
         asyncio.run(run())

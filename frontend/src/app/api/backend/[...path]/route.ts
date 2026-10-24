@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeDemoRequest } from "@/lib/server/demo-auth";
 
 const ROUTES = new Map<string, { method: "GET" | "POST"; upstream: string }>([
   ["health", { method: "GET", upstream: "/health" }],
+  ["api/v1/inference/status", { method: "GET", upstream: "/api/v1/inference/status" }],
   ["api/v1/repositories/analyze", { method: "POST", upstream: "/api/v1/repositories/analyze" }],
   ["api/v1/tasks/plan", { method: "POST", upstream: "/api/v1/tasks/plan" }],
   ["api/v1/proposals/create", { method: "POST", upstream: "/api/v1/proposals/create" }],
@@ -19,6 +21,8 @@ function errorResponse(status: number, code: string, message: string) {
 }
 
 async function proxy(request: NextRequest, context: RouteContext) {
+  const access = authorizeDemoRequest(request);
+  if (access) return access;
   const { path } = await context.params;
   const pathKey = path.join("/");
   const route = ROUTES.get(pathKey) ?? (

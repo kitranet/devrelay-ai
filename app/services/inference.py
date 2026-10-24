@@ -6,6 +6,7 @@ from app.core.config import Settings
 from app.integrations.nebius import NebiusClient
 from app.models.inference import ChatMessage, InferenceRequest, InferenceResponse
 from app.services.mock_inference import MockModelProvider
+from app.services.inference_quota import InferenceQuota, SQLiteInferenceQuota
 
 
 class InferenceProvider(Protocol):
@@ -34,8 +35,8 @@ class InferenceService:
         )
 
 
-def build_inference_service(settings: Settings) -> InferenceService:
+def build_inference_service(settings: Settings, quota: InferenceQuota | None = None) -> InferenceService:
     """Select exactly one configured provider; provider failures never fall back."""
     if settings.inference_provider == "mock":
         return InferenceService(MockModelProvider())
-    return InferenceService(NebiusClient(settings))
+    return InferenceService(NebiusClient(settings, quota=quota or SQLiteInferenceQuota(settings.nebius_quota_db_path, settings.nebius_total_inference_quota)))

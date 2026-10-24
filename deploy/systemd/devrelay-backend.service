@@ -1,0 +1,29 @@
+[Unit]
+Description=DevRelay AI FastAPI backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=devrelay-backend
+Group=devrelay-backend
+WorkingDirectory=/opt/devrelay-ai
+EnvironmentFile=/etc/devrelay-ai/backend.env
+ExecStart=/opt/devrelay-ai/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+ReadOnlyPaths=/opt/devrelay-ai
+ReadWritePaths=/var/lib/devrelay-ai
+
+[Install]
+WantedBy=multi-user.target

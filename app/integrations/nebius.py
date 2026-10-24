@@ -24,6 +24,7 @@ from app.core.errors import (
     ModelTimeoutError,
 )
 from app.models.inference import ChatMessage, InferenceResponse, InferenceUsage
+from app.services.inference_quota import InferenceQuota, SQLiteInferenceQuota
 
 logger = logging.getLogger(__name__)
 MAX_PROVIDER_RESPONSE_BYTES = 1_000_000
@@ -49,10 +50,11 @@ def estimate_prompt_tokens(messages: list[ChatMessage], model: str) -> int:
 
 
 class NebiusClient:
-    def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None) -> None:
+    def __init__(self, settings: Settings, http_client: httpx.AsyncClient | None = None, quota: InferenceQuota | None = None) -> None:
         self.settings = settings
         self._http_client = http_client
         self._in_flight = threading.BoundedSemaphore(settings.nebius_max_in_flight_requests)
+        self._quota = quota or SQLiteInferenceQuota(settings.nebius_quota_db_path, settings.nebius_total_inference_quota)
 
     async def complete(
         self,
@@ -63,6 +65,8 @@ class NebiusClient:
         json_mode: bool = False,
     ) -> InferenceResponse:
         if self.settings.inference_provider != "nebius":
+            raise LiveInferenceDisabledError()
+        if not self.settings.nebius_live_inference_enabled:
             raise LiveInferenceDisabledError()
         if self.settings.nebius_api_key is None or not self.settings.nebius_api_key.get_secret_value():
             raise MissingCredentialsError("NEBIUS_API_KEY is required for model inference.")
@@ -80,6 +84,12 @@ class NebiusClient:
             raise InferenceLimitError("Estimated prompt size exceeds NEBIUS_MAX_PROMPT_TOKENS.")
         if not self._in_flight.acquire(blocking=False):
             raise InferenceLimitError("The configured maximum number of paid inference requests is already in flight.")
+
+        try:
+            self._quota.reserve()
+        except Exception:
+            self._in_flight.release()
+            raise
 
         endpoint = f"{self.settings.nebius_base_url.rstrip('/')}/chat/completions"
         payload = {

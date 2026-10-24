@@ -18,6 +18,8 @@ def test_settings_defaults_and_secret(monkeypatch):
     assert settings.nebius_max_prompt_tokens == 6000
     assert settings.nebius_max_in_flight_requests == 1
     assert settings.nebius_planning_disable_thinking is False
+    assert settings.nebius_live_inference_enabled is False
+    assert settings.nebius_total_inference_quota == 0
     assert settings.nebius_api_key.get_secret_value() == "test-secret"
 
 
@@ -33,6 +35,8 @@ def test_invalid_paid_request_limits_are_rejected():
         Settings(nebius_max_prompt_tokens=100, _env_file=None)
     with pytest.raises(ValidationError):
         Settings(nebius_max_in_flight_requests=0, _env_file=None)
+    with pytest.raises(ValidationError):
+        Settings(nebius_total_inference_quota=-1, _env_file=None)
 
 
 def test_rejects_non_https_base_url():

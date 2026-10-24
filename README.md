@@ -27,7 +27,7 @@ Phase 6B adds an explicitly opted-in Nebius planning provider. The application d
 
 ## Local dashboard
 
-The Next.js dashboard lives in `frontend/`. Configure the synthetic repository in the backend and start FastAPI on port 8001, then copy `frontend/.env.example` to `frontend/.env.local`, install with `npm ci`, and run `npm run dev` from that directory. The dashboard opens at `http://localhost:3000`. Full setup and test commands are in [docs/setup.md](docs/setup.md).
+The Next.js dashboard lives in `frontend/`. Configure only the synthetic repository in the backend. The dashboard now fails closed unless server-side `DEMO_AUTH_USERNAME`, `DEMO_AUTH_PASSWORD`, and exact `DEMO_AUTH_ORIGIN` values are set. Use a protected local environment, keep both services bound to loopback, and run the frontend at the configured origin. Full setup and judge deployment instructions are in [docs/deployment.md](docs/deployment.md) and [docs/setup.md](docs/setup.md).
 
 ## Project docs
 
@@ -37,6 +37,7 @@ The Next.js dashboard lives in `frontend/`. Configure the synthetic repository i
 - [Phase 7 evaluation and measured results](docs/phase-7-evaluation.md)
 - [Repeatable demo script](docs/demo-script.md)
 - [Security limitations](docs/security-limitations.md)
+- [Phase 8B deployment and judge guide](docs/deployment.md)
 
 ## Phase 7 demo and evaluation
 
@@ -53,3 +54,7 @@ The evaluation JSON is checked in at `docs/evaluation/phase-7-results.json`. Moc
 ## License
 
 Apache-2.0. NVIDIA model terms are separate; consult the model provider and model license before production use.
+
+## Judge-accessible demo preparation
+
+Phase 8B adds a fail-closed demo authentication gate, an operator kill switch for paid inference, a durable single-host request quota, and Linux reverse-proxy/service templates. No public deployment has been performed. Start with the mock provider; live Nemotron requires explicit provider selection, the kill switch, a configured secret, and quota capacity. See [docs/deployment.md](docs/deployment.md) for architecture, judge instructions, and the unvalidated deployment procedure. Do not expose FastAPI or Next.js ports directly.

@@ -1,4 +1,13 @@
 export type HealthResponse = { status: "ok" };
+export type InferenceStatus = {
+  provider: "nebius" | "mock";
+  live_inference_enabled: boolean;
+  credentials_configured: boolean;
+  quota_status: "not_applicable" | "available" | "exhausted" | "unavailable";
+  quota_total: number | null;
+  quota_used: number | null;
+  quota_remaining: number | null;
+};
 
 export type SourceReference = {
   path: string;

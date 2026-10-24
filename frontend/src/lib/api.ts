@@ -1,4 +1,4 @@
-import type { ApiError, CodeChangeProposal, HandoffReport, HealthResponse, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, ReviewRecord, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
+import type { ApiError, CodeChangeProposal, HandoffReport, HealthResponse, InferenceStatus, LocalReviewStatus, RepositoryAnalysis, ReviewDecision, ReviewHistory, ReviewRecord, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -30,7 +30,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       inference_limit_exceeded: "This request exceeds a local inference budget or concurrency limit. No paid request was sent.",
       sensitive_inference_content: "Planning stopped because the input or response contains credential-like content. Remove secrets before trying again.",
       missing_credentials: "Nebius inference is not configured with an API key. No mock fallback was used.",
-      live_inference_disabled: "Live inference is disabled. Explicitly select the Nebius provider before requesting a paid plan.",
+      live_inference_disabled: "Live inference is blocked. Nebius must be explicitly selected and the operator kill switch enabled.",
+      inference_quota_exhausted: "The live inference request allowance is exhausted. No request was sent.",
+      inference_quota_unavailable: "Live inference is blocked because request accounting is unavailable.",
       model_provider_error: "Nebius could not complete the request. Check provider availability; no mock fallback was used.",
       model_timeout: "Nebius inference timed out. No automatic retry was made.",
     };
@@ -41,6 +43,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const checkBackend = () => requestJson<HealthResponse>("health");
+export const getInferenceStatus = () => requestJson<InferenceStatus>("api/v1/inference/status");
 
 export const analyzeRepository = (repositoryId: string) =>
   requestJson<RepositoryAnalysis>("api/v1/repositories/analyze", {

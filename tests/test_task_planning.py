@@ -104,7 +104,7 @@ def test_nonexistent_provider_file_reference_is_marked_unsupported(tmp_path):
 
 
 def test_nebius_missing_credentials_returns_provider_error_without_mock_fallback(tmp_path):
-    with make_client(tmp_path, provider="nebius") as client:
+    with make_client(tmp_path, provider="nebius", nebius_live_inference_enabled=True) as client:
         response = client.post("/api/v1/tasks/plan", json={
             "repository_id": "planning-fixture", "task_description": "Fix the division by zero defect"
         })

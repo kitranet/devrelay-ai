@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes import health
+from app.api.routes import inference
 from app.api.routes import handoffs
 from app.api.routes import proposals
 from app.api.routes import repositories
@@ -19,6 +20,7 @@ from app.services.repository_analysis import RepositoryScanner
 from app.services.inference import build_inference_service
 from app.services.proposal_store import InMemoryHandoffStore, InMemoryProposalStore, InMemoryReviewStore, InMemoryRuntimeValidationStore, InMemoryTaskPlanStore
 from app.services.runtime_validation import UnavailableSandboxExecutor
+from app.services.inference_quota import SQLiteInferenceQuota
 
 
 @asynccontextmanager
@@ -38,7 +40,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     register_exception_handlers(application)
     application.state.repository_scanner = RepositoryScanner(configured_settings)
-    application.state.inference_service = build_inference_service(configured_settings)
+    quota = SQLiteInferenceQuota(
+        configured_settings.nebius_quota_db_path,
+        configured_settings.nebius_total_inference_quota,
+    )
+    application.state.inference_quota = quota
+    application.state.inference_service = build_inference_service(configured_settings, quota=quota)
     application.state.task_plan_store = InMemoryTaskPlanStore()
     application.state.proposal_store = InMemoryProposalStore()
     application.state.review_store = InMemoryReviewStore()
@@ -47,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.runtime_validation_executor = UnavailableSandboxExecutor()
     application.state.settings = configured_settings
     application.include_router(health.router)
+    application.include_router(inference.router)
     application.include_router(repositories.router)
     application.include_router(tasks.router)
     application.include_router(proposals.router)

@@ -49,6 +49,16 @@ class InferenceDiagnostics(BaseModel):
     usage: InferenceUsage | None = None
 
 
+class InferenceStatusResponse(BaseModel):
+    provider: Literal["nebius", "mock"]
+    live_inference_enabled: bool
+    credentials_configured: bool
+    quota_status: Literal["not_applicable", "available", "exhausted", "unavailable"]
+    quota_total: int | None = Field(default=None, ge=0)
+    quota_used: int | None = Field(default=None, ge=0)
+    quota_remaining: int | None = Field(default=None, ge=0)
+
+
 def diagnostics_for(response: InferenceResponse) -> InferenceDiagnostics:
     return InferenceDiagnostics(
         provider=response.provider,
