@@ -4,16 +4,9 @@ An open-source engineering handoff agent with configurable Nebius-hosted NVIDIA 
 
 ## Quick start
 
-Use Python 3.12 or newer. See [docs/setup.md](docs/setup.md) for environment setup and Nebius configuration.
+Use Python 3.12 or newer and Node.js/npm for the dashboard. DevRelay is configured for local use: FastAPI listens on `127.0.0.1:8001`, and Next.js must be explicitly bound to `127.0.0.1:3000`. The application defaults to deterministic mock inference; live Nebius requests require explicit provider selection and a separate kill switch. The dashboard fails closed unless server-only Basic Authentication credentials and an exact `DEMO_AUTH_ORIGIN` are configured. Follow the Windows-specific [setup and production preflight](docs/windows-hosting.md); general dependency and API details are in [docs/setup.md](docs/setup.md).
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-uvicorn app.main:app --reload
-```
-
-The health check is available at `http://127.0.0.1:8000/health`. Repository analysis is available at `POST /api/v1/repositories/analyze`, and planning at `POST /api/v1/tasks/plan`; configure authorized repository IDs first as described in [docs/setup.md](docs/setup.md). API docs are at `/docs`.
+The health check is available at `http://127.0.0.1:8001/health`. Repository analysis is available at `POST /api/v1/repositories/analyze`, and planning at `POST /api/v1/tasks/plan`; configure only authorized repository IDs as described in [docs/setup.md](docs/setup.md). API docs are available locally at `/docs` on the backend and must not be publicly exposed.
 
 Phase 4B adds `POST /api/v1/proposals/create` for the predefined division-by-zero calculator task and `GET /api/v1/proposals/{proposal_id}` to retrieve a review-only proposal. Phase 7B allows either a server-validated mock or Nebius plan to continue only when its integrity, provider provenance, evidence and content-hashed analysis snapshot are verified. The proposal remains one deterministic, allowlisted in-memory diff; model output is never translated into code. Static checks use unified-diff validation and Python AST parsing. Runtime validation reports `not_run` because no trusted sandbox is configured. No proposal endpoint applies code.
 
@@ -27,7 +20,7 @@ Phase 6B adds an explicitly opted-in Nebius planning provider. The application d
 
 ## Local dashboard
 
-The Next.js dashboard lives in `frontend/`. Configure only the synthetic repository in the backend. The dashboard now fails closed unless server-side `DEMO_AUTH_USERNAME`, `DEMO_AUTH_PASSWORD`, and exact `DEMO_AUTH_ORIGIN` values are set. Use a protected local environment, keep both services bound to loopback, and run the frontend at the configured origin. Full setup and judge deployment instructions are in [docs/deployment.md](docs/deployment.md) and [docs/setup.md](docs/setup.md).
+The Next.js dashboard lives in `frontend/`. Configure only the synthetic repository in the backend. The dashboard fails closed unless server-side `DEMO_AUTH_USERNAME`, `DEMO_AUTH_PASSWORD`, and exact `DEMO_AUTH_ORIGIN` values are set. Keep both services bound to loopback and open the exact configured origin. See the [Windows hosting runbook](docs/windows-hosting.md) for separate development and production-mode startup, and [docs/deployment.md](docs/deployment.md) for the Linux-only Nginx/systemd proposal. No public tunnel has been created or enabled.
 
 ## Project docs
 

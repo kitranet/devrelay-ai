@@ -5,20 +5,23 @@
 - Python 3.12 or newer
 - A Nebius Token Factory API key only for genuine inference (unit tests do not need one)
 
-## Install and run (PowerShell)
+## Install and run locally (PowerShell)
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-uvicorn app.main:app --reload
+$env:ENVIRONMENT = "development"
+$env:INFERENCE_PROVIDER = "mock"
+$env:NEBIUS_LIVE_INFERENCE_ENABLED = "false"
+$env:AUTHORIZED_REPOSITORIES = '{"planning-fixture":"C:/DevRelay-AI/tests/fixtures/planning_repo"}'
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 ```
 
-The API runs at `http://127.0.0.1:8000`; health is at `/health`, and interactive API documentation is at `/docs`.
+The FastAPI backend listens on `http://127.0.0.1:8001`; health is at `/health`, and interactive API documentation is at `/docs`. The mock provider is the default and does not contact Nebius. Do not copy an environment template over an existing `.env`; set temporary PowerShell process variables as above or create a protected local file only after checking that it does not already exist. Keep `.env`, secrets, `.venv`, and runtime state out of Git.
 
-## Local dashboard authentication
+## Local dashboard authentication and development mode
 
 The Next.js dashboard now fails closed unless its server process has a username, password, and exact origin configured. For a local run at `http://127.0.0.1:3000`, use PowerShell's secure credential prompt before starting Next.js; do not save these example values in source control:
 
@@ -31,7 +34,7 @@ Set-Location C:\devrelay-ai\frontend
 npm.cmd run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Open the exact configured origin and authenticate when the browser challenges. Keep the backend bound to loopback too. Clear these process variables after stopping the frontend. For public judging use the HTTPS deployment guide; do not use this local command as a public deployment.
+This command runs the **development server**, not the production server. Open the exact configured origin and authenticate when the browser challenges. Keep the backend bound to loopback too. Clear process variables after stopping the frontend. Never omit the explicit `--hostname 127.0.0.1` flag: Next.js otherwise defaults to `0.0.0.0`. For production-mode local validation on Windows, use [docs/windows-hosting.md](windows-hosting.md). The Linux Nginx/systemd guide is not a Windows hosting recipe.
 
 ## Configuration
 
@@ -70,16 +73,16 @@ For example, configure a repository root in PowerShell with:
 $env:AUTHORIZED_REPOSITORIES = '{"devrelay":"C:/DevRelay-AI"}'
 ```
 
-The scanner accepts only the configured ID (`devrelay`) in API requests. It never accepts a client-provided path. Do not expose the API directly; use the authenticated HTTPS gateway described in [deployment.md](deployment.md).
+The scanner accepts only the configured ID (`devrelay`) in API requests. It never accepts a client-provided path. Keep FastAPI bound to loopback for local use. External access is not configured; [deployment.md](deployment.md) is a Linux-only proposal, not an active gateway.
 
-The analysis route is `POST http://127.0.0.1:8000/api/v1/repositories/analyze` with JSON body `{"repository_id":"devrelay"}`. It returns summary counts, repository-relative file and symbol references, imports, dependency manifests, test/config/README paths, and sanitized warnings. It does not read environment files, credentials, SSH keys, or secret directories, and it skips all symlinks and common generated/binary content. It parses Python with `ast` without importing or executing it. File count, individual and aggregate size, depth, and processing time are bounded.
+The analysis route is `POST http://127.0.0.1:8001/api/v1/repositories/analyze` with JSON body `{"repository_id":"devrelay"}`. It returns summary counts, repository-relative file and symbol references, imports, dependency manifests, test/config/README paths, and sanitized warnings. It does not read environment files, credentials, SSH keys, or secret directories, and it skips all symlinks and common generated/binary content. It parses Python with `ast` without importing or executing it. File count, individual and aggregate size, depth, and processing time are bounded.
 
 ## Task planning API
 
 Request `POST /api/v1/tasks/plan` with a repository ID already configured in `AUTHORIZED_REPOSITORIES`:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/tasks/plan `
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/api/v1/tasks/plan `
   -ContentType 'application/json' `
   -Body '{"repository_id":"devrelay","task_description":"Investigate the unfamiliar request parser and its dependencies"}'
 ```
@@ -128,14 +131,19 @@ In a second PowerShell terminal:
 
 ```powershell
 Set-Location C:\devrelay-ai\frontend
-if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
 npm ci
-npm run dev
+$demoCredential = Get-Credential -UserName 'local-judge' -Message 'Use the temporary local dashboard credential configured for this process'
+$env:BACKEND_API_URL = "http://127.0.0.1:8001"
+$env:NEXT_PUBLIC_REPOSITORY_IDS = "planning-fixture"
+$env:DEMO_AUTH_USERNAME = $demoCredential.UserName
+$env:DEMO_AUTH_PASSWORD = $demoCredential.GetNetworkCredential().Password
+$env:DEMO_AUTH_ORIGIN = "http://127.0.0.1:3000"
+npm.cmd run dev -- --hostname 127.0.0.1 --port 3000
 ```
 
-Open `http://localhost:3000`. `NEXT_PUBLIC_REPOSITORY_IDS` contains only configured IDs (comma-separated), never filesystem paths. `NEXT_PUBLIC_LOCAL_REVIEWER_ID` is an unverified display label only; use a pseudonym. The backend's `AUTHORIZED_REPOSITORIES` remains the authorization boundary. `BACKEND_API_URL` is server-side only and must point to a local loopback backend; no model credentials are read by the frontend. The frontend scripts select Next.js Webpack mode because Turbopack's CSS worker exited before connecting on this Windows development host.
+Open `http://127.0.0.1:3000`. `NEXT_PUBLIC_REPOSITORY_IDS` contains only configured IDs (comma-separated), never filesystem paths. `NEXT_PUBLIC_LOCAL_REVIEWER_ID` is an unverified display label only; use a pseudonym. The backend's `AUTHORIZED_REPOSITORIES` remains the authorization boundary. `BACKEND_API_URL` and `DEMO_AUTH_*` are server-side only; do not set Nebius credentials in the frontend environment. The frontend scripts select Next.js Webpack mode because Turbopack's CSS worker exited before connecting on this Windows development host. Review decisions are disabled by default and remain unverified local labels when explicitly enabled for development.
 
-Restart FastAPI after changing its environment. Restart the Next.js development server after changing `frontend/.env.local`, especially the public repository IDs. Use `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` in `frontend/`. The dashboard is local-development only: no authentication, no repository discovery endpoint, no code changes or execution, and no production deployment configuration are included.
+Restart FastAPI after changing its environment. Restart the Next.js development server after changing its process environment. Use `npm.cmd test`, `npm.cmd run lint`, `npm.cmd run typecheck`, and `npm.cmd run build` in `frontend/`. The dashboard has server-side Basic Authentication and mutation-origin checks when configured. This development command is still local-only; it is not a judge-facing deployment. No repository discovery endpoint, code application, or code execution is available. Windows production-mode steps and operations are in [docs/windows-hosting.md](windows-hosting.md).
 
 The example environment and application default select `INFERENCE_PROVIDER=mock`, including when `NEBIUS_API_KEY` is configured. Live inference requires explicit `INFERENCE_PROVIDER=nebius`; the Nebius client also refuses direct calls unless this opt-in is set. Mock responses identify themselves with `provider="mock"`, `is_mock=true`, and `devrelay-mock-v1`. Nebius failures never fall back to mock. Planning output carries safe provider/model/completion/latency/token diagnostics; it never carries prompts, provider response bodies, headers, or model reasoning. No streaming is used.
 
