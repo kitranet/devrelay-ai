@@ -21,6 +21,8 @@ from app.services.inference import build_inference_service
 from app.services.proposal_store import InMemoryHandoffStore, InMemoryProposalStore, InMemoryReviewStore, InMemoryRuntimeValidationStore, InMemoryTaskPlanStore
 from app.services.runtime_validation import UnavailableSandboxExecutor
 from app.services.inference_quota import SQLiteInferenceQuota
+from app.services.inference_pricing import PricingRegistry
+from app.services.inference_telemetry import SQLiteInferenceTelemetry
 
 
 @asynccontextmanager
@@ -45,7 +47,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         configured_settings.nebius_total_inference_quota,
     )
     application.state.inference_quota = quota
-    application.state.inference_service = build_inference_service(configured_settings, quota=quota)
+    telemetry = SQLiteInferenceTelemetry(
+        configured_settings.inference_telemetry_db_path,
+        PricingRegistry(configured_settings.inference_pricing_overrides_json),
+        configured_settings.inference_telemetry_retention_days,
+    )
+    application.state.inference_telemetry = telemetry
+    application.state.inference_service = build_inference_service(configured_settings, quota=quota, telemetry=telemetry)
     application.state.task_plan_store = InMemoryTaskPlanStore()
     application.state.proposal_store = InMemoryProposalStore()
     application.state.review_store = InMemoryReviewStore()

@@ -362,3 +362,26 @@ h1, h2, h3, h4, p { margin-top: 0; }
   gap: 0.4rem 1rem;
   color: #63746c;
 }
+
+.incident-brief, .usage-panel {
+  margin: 1.2rem 0;
+  padding: 1.15rem 1.25rem;
+  border: 1px solid #dce6df;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 54, 43, .04);
+}
+.incident-brief { background: linear-gradient(115deg, #f0f7f2, #fff 72%); }
+.incident-label { color: #587566; font-size: .68rem; font-weight: 700; letter-spacing: .13em; }
+.incident-brief h2 { margin: .45rem 0; color: #20352d; font-size: 1.2rem; }
+.incident-brief p, .usage-disclosure, .usage-retention { color: #66776e; font-size: .8rem; line-height: 1.65; }
+.incident-workflow { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .9rem; }
+.incident-workflow span { border: 1px solid #dce6df; border-radius: 999px; padding: .35rem .65rem; color: #35634f; background: #fff; font-size: .7rem; font-weight: 600; }
+.usage-panel { margin-top: 1.5rem; }
+.usage-table-wrap { overflow-x: auto; margin: .8rem 0; border: 1px solid #e5ebe6; border-radius: 9px; }
+.usage-table { width: 100%; min-width: 950px; border-collapse: collapse; font-size: .72rem; }
+.usage-table th { padding: .65rem .7rem; color: #61736a; background: #f6f8f5; text-align: left; font-size: .64rem; text-transform: uppercase; letter-spacing: .07em; }
+.usage-table td { padding: .65rem .7rem; border-top: 1px solid #edf1ed; color: #263a31; vertical-align: top; }
+.usage-table td small { display: block; max-width: 190px; margin-top: .28rem; color: #78877f; line-height: 1.45; overflow-wrap: anywhere; }
+.usage-table td a { color: #18725a; text-decoration: underline; }
+.usage-retention { display: block; margin-top: .7rem; font-size: .68rem; }

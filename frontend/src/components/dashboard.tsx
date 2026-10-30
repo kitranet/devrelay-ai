@@ -1,12 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { analyzeRepository, checkBackend, createProposal, generateHandoff, generatePlanOnlyHandoff, getInferenceStatus, getLocalReviewStatus, getPlanReviewHistory, getReviewHistory, getSandboxReadiness, planTask, requestRuntimeValidation, submitPlanReview, submitReview } from "@/lib/api";
+import { analyzeRepository, checkBackend, createProposal, generateHandoff, generatePlanOnlyHandoff, getInferenceAttempts, getInferenceStatus, getLocalReviewStatus, getPlanReviewHistory, getReviewHistory, getSandboxReadiness, planTask, requestRuntimeValidation, submitPlanReview, submitReview } from "@/lib/api";
 import { handoffToMarkdown } from "@/lib/handoff-markdown";
-import type { CodeChangeProposal, HandoffReport, InferenceStatus, LocalReviewStatus, PlanOnlyHandoffReport, PlanReviewDecision, PlanReviewHistory, RepositoryAnalysis, ReviewDecision, ReviewHistory, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
+import type { CodeChangeProposal, HandoffReport, InferenceAttemptHistory, InferenceStatus, LocalReviewStatus, PlanOnlyHandoffReport, PlanReviewDecision, PlanReviewHistory, RepositoryAnalysis, ReviewDecision, ReviewHistory, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
 
 type BackendState = "checking" | "connected" | "offline";
 const reviewerIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const continuityTask = "Investigate why the 02:00 ingestion job can publish a successful report with fewer rows than the inbound batch. Trace orchestration, validation, transformation, retry, configuration, and publication behavior. Propose safe investigation steps, evidence to collect, and regression checks. Do not assume the root cause, change repository files, or execute code.";
 const credentialLikeReviewerIdentifier = /(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+|nvapi-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})/i;
 
 function reviewerIdentifierError(value: string): string | null {
@@ -51,6 +52,7 @@ export default function Dashboard() {
   const [proposal, setProposal] = useState<CodeChangeProposal | null>(null);
   const [reviewStatus, setReviewStatus] = useState<LocalReviewStatus | null>(null);
   const [inferenceStatus, setInferenceStatus] = useState<InferenceStatus | null>(null);
+  const [inferenceAttempts, setInferenceAttempts] = useState<InferenceAttemptHistory | null>(null);
   const [reviewHistory, setReviewHistory] = useState<ReviewHistory | null>(null);
   const [sandboxReadiness, setSandboxReadiness] = useState<SandboxReadiness | null>(null);
   const [runtimeEvidence, setRuntimeEvidence] = useState<RuntimeValidationEvidence | null>(null);
@@ -65,7 +67,7 @@ export default function Dashboard() {
   const [outstandingQuestions, setOutstandingQuestions] = useState("");
   const [executionAuthorizer, setExecutionAuthorizer] = useState(process.env.NEXT_PUBLIC_EXECUTION_AUTHORIZER_ID ?? "local_authorizer");
   const [executionPurpose, setExecutionPurpose] = useState("");
-  const [taskDescription, setTaskDescription] = useState("");
+  const [taskDescription, setTaskDescription] = useState(configuredRepositories[0]?.toLowerCase().includes("continuity-pipeline") ? continuityTask : "");
   const [analysisBusy, setAnalysisBusy] = useState(false);
   const [planningBusy, setPlanningBusy] = useState(false);
   const [proposalBusy, setProposalBusy] = useState(false);
@@ -95,6 +97,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     getInferenceStatus().then(setInferenceStatus).catch(() => setInferenceStatus(null));
+    getInferenceAttempts().then(setInferenceAttempts).catch(() => setInferenceAttempts(null));
   }, []);
 
   useEffect(() => {
@@ -177,6 +180,7 @@ export default function Dashboard() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Task planning failed.");
     } finally {
+      getInferenceAttempts().then(setInferenceAttempts).catch(() => setInferenceAttempts(null));
       setPlanningBusy(false);
     }
   }
@@ -340,6 +344,11 @@ export default function Dashboard() {
     setPlanReview(null);
     setPlanHandoff(null);
     setError(null);
+    if (value.toLowerCase().includes("continuity-pipeline")) {
+      setTaskDescription(continuityTask);
+    } else {
+      setTaskDescription("");
+    }
   }
 
   const isMock = plan?.is_mock === true;
@@ -355,6 +364,7 @@ export default function Dashboard() {
           <a className="active" href="#overview">Workspace</a>
           <a href="#repository-intelligence">Repository</a>
           <a href="#task-planner">Task planner</a>
+          <a href="#inference-usage">Run history</a>
         </nav>
         <div className="topbar-right">
           <Badge tone={backend === "connected" ? "good" : backend === "offline" ? "warning" : "neutral"}>
@@ -367,9 +377,9 @@ export default function Dashboard() {
       <main id="overview" className="main-content">
         <section className="welcome-row" aria-labelledby="page-title">
           <div>
-            <p className="eyebrow">ENGINEERING HANDOFF WORKSPACE <span>·</span> PHASE 5A</p>
-            <h1 id="page-title">Good work starts with <em>context.</em></h1>
-            <p className="welcome-copy">Understand a repository. Shape a plan. Keep every next step grounded in evidence.</p>
+            <p className="eyebrow">ENGINEERING CONTINUITY WORKSPACE <span>·</span> SYNTHETIC INCIDENT</p>
+            <h1 id="page-title">Carry the investigation <em>forward.</em></h1>
+            <p className="welcome-copy">Map the system, inspect source evidence, record an investigation plan, and hand the next engineer a reviewable trail.</p>
           </div>
           <div className="backend-summary" aria-live="polite">
             <span className={`status-orb ${backend}`} />
@@ -392,6 +402,8 @@ export default function Dashboard() {
 
         {isMock && <div className="mock-banner" role="status"><span aria-hidden="true">✳</span><div><strong>MOCK MODE</strong><span>Simulated inference for development testing. This result was not generated by NVIDIA Nemotron.</span></div></div>}
         {error && <div className="error-banner" role="alert"><strong>Request failed</strong><span>{error}</span><button type="button" onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}
+
+        {repositoryId.toLowerCase().includes("continuity-pipeline") && <section className="incident-brief" aria-label="Synthetic incident overview"><span className="incident-label">SYNTHETIC INCIDENT · NORTHSTAR NIGHTLY REPORTS</span><h2>Successful runs are publishing fewer rows than arrived.</h2><p>The receiving engineer needs to trace the ingestion, validation, transformation, retry and publication path. The symptom is known; the root cause is intentionally not provided to the planner.</p><div className="incident-workflow"><span>01 Analyze</span><span>02 Investigate</span><span>03 Verify evidence</span><span>04 Review and hand off</span></div></section>}
 
         <div className="section-heading"><div><p className="eyebrow">YOUR ENGINEERING TOOLKIT</p><h2>Explore &amp; plan</h2></div><span className="local-note"><span aria-hidden="true">●</span> Local analysis · Read-only</span></div>
 
@@ -457,6 +469,8 @@ export default function Dashboard() {
           </section>
         </div>
 
+        <InferenceHistoryPanel history={inferenceAttempts} onRefresh={() => getInferenceAttempts().then(setInferenceAttempts).catch(() => setInferenceAttempts(null))} />
+
         <section className="roadmap-panel" aria-labelledby="roadmap-title">
           <div className="roadmap-heading"><div><p className="eyebrow">ON THE HORIZON</p><h2 id="roadmap-title">More ways to move work forward</h2></div><Badge tone="muted">Coming later</Badge></div>
           <div className="roadmap-items"><RoadmapItem number="03" title="Safe code proposals" detail="A fixed calculator scenario produces a static, review-only diff." available /><RoadmapItem number="04" title="Autonomous execution" detail="Isolated validation with explicit human approval." /><RoadmapItem number="05" title="Team handoffs" detail="Share context and decisions across your team." /></div>
@@ -467,6 +481,25 @@ export default function Dashboard() {
       </main>
     </div>
   );
+}
+
+function InferenceHistoryPanel({ history, onRefresh }: { history: InferenceAttemptHistory | null; onRefresh: () => void }) {
+  return <section id="inference-usage" className="usage-panel" aria-labelledby="usage-heading">
+    <div className="roadmap-heading"><div><p className="eyebrow">LOCAL SQLITE · SANITIZED METADATA</p><h2 id="usage-heading">Inference runs and estimated cost</h2></div><button className="button button-light" type="button" onClick={onRefresh}>Refresh history</button></div>
+    <p className="usage-disclosure">Per-run token usage and request metadata are retained locally for up to {history?.retention_days ?? 90} days. Cost is estimated from a published model-specific token rate when complete usage is returned; actual provider billing is unavailable. Reasoning tokens are already included in output tokens. Request quotas limit request count, not dollars. Prompts, source excerpts, credentials and provider response bodies are never stored.</p>
+    {!history && <p className="subtle-empty">Run history is unavailable until the local telemetry store can be read.</p>}
+    {history?.records?.length === 0 && <p className="subtle-empty">No inference attempts have been recorded in this telemetry database yet.</p>}
+    {history && history.records?.length > 0 && <div className="usage-table-wrap"><table className="usage-table"><thead><tr><th>Started</th><th>Repository / task</th><th>Provider / model</th><th>Result</th><th>Tokens in / out</th><th>Estimated cost</th><th>Validation</th></tr></thead><tbody>{history.records.map((run) => <tr key={run.run_id}>
+      <td><time dateTime={run.started_at}>{new Date(run.started_at).toLocaleString()}</time><small>{run.duration_ms == null ? "Duration unavailable" : `${run.duration_ms.toLocaleString()} ms`}</small></td>
+      <td><strong>{run.repository_id}</strong><small>Task {run.task_id.slice(0, 8)}…</small></td>
+      <td><strong>{run.provider === "mock" ? "Mock · offline" : "Nebius Token Factory"}</strong><small>{run.provider_reported_model ? `Provider reported: ${run.provider_reported_model}` : `Configured: ${run.model}`}</small>{run.provider_reported_model && run.provider_reported_model !== run.model && <small>Configured model differed: {run.model}</small>}</td>
+      <td><strong>{run.request_status.replaceAll("_", " ")}</strong><small>{run.provider_http_status == null ? "Provider HTTP status unavailable" : `HTTP ${run.provider_http_status}`}{run.finish_reason ? ` · ${run.finish_reason}` : ""}{run.error_code ? ` · ${run.error_code}` : ""}</small></td>
+      <td>{run.input_tokens == null ? "unknown" : run.input_tokens.toLocaleString()} / {run.output_tokens == null ? "unknown" : run.output_tokens.toLocaleString()}<small>Reasoning: {run.reasoning_tokens == null ? "unknown" : run.reasoning_tokens.toLocaleString()} · usage {run.provider_usage_received ? "received" : "not received"}</small></td>
+      <td>{run.estimated_cost_usd == null ? "unknown" : `$${run.estimated_cost_usd}`}<small>{run.pricing_source ? <a href={run.pricing_source} target="_blank" rel="noreferrer">Estimate · rate as of {run.pricing_as_of}</a> : run.billing_status === "not_applicable" ? "No external call" : "No matching rate or complete usage"}<br />Actual billing: unavailable</small></td>
+      <td>Plan: {run.plan_validation_status}<small>{run.plan_validation_failure_category ? `Rejected: ${run.plan_validation_failure_category.replaceAll("_", " ")}` : `Citations: ${run.citation_validation_status}`}{run.verified_reference_count != null ? ` · ${run.verified_reference_count} verified` : ""}{run.unsupported_reference_count != null ? ` · ${run.unsupported_reference_count} unsupported` : ""}</small></td>
+    </tr>)}</tbody></table></div>}
+    <small className="usage-retention">History is bounded to {history?.maximum_records ?? 5_000} records and configured retention. Legacy attempts without preserved results are not reconstructed or assigned token or cost values.</small>
+  </section>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
@@ -483,6 +516,8 @@ function PlanResult({ plan }: { plan: TaskPlan }) {
     {diagnostics && <section className="inference-diagnostics" aria-label="Inference diagnostics">
       <strong>{plan.is_mock ? "Deterministic mock result — not AI-generated." : plan.unsupported_references.length > 0 ? "AI-generated plan; verified evidence is listed separately. Rejected citations are unverified." : "AI-generated planning result; source evidence was validated locally."}</strong>
       <div><span>Model: <code>{diagnostics.model}</code>{!diagnostics.model_reported_by_provider && " (requested; provider omitted model identity)"}</span>
+        {diagnostics.run_id && <span>Run ID: <code>{diagnostics.run_id}</code></span>}
+        {diagnostics.provider_http_status !== null && <span>Provider HTTP: {diagnostics.provider_http_status}</span>}
         <span>Completion: {diagnostics.completion_status}{diagnostics.finish_reason ? ` · ${diagnostics.finish_reason}` : ""}</span>
         {diagnostics.latency_ms !== null && <span>Latency: {diagnostics.latency_ms} ms</span>}
         {usage && <span>Tokens: input {usage.input_tokens ?? "n/a"} · output {usage.output_tokens ?? "n/a"} · reasoning {usage.reasoning_tokens ?? "n/a"} · total {usage.total_tokens ?? "n/a"}</span>}

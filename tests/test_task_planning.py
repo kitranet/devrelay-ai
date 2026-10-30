@@ -10,9 +10,22 @@ from app.core.config import Settings
 from app.main import create_app
 from app.models.inference import InferenceResponse, InferenceUsage
 from app.services.mock_inference import MockModelProvider
+from app.services.task_planning import _telemetry_validation_category
 
 
 PLANNING_REPO = Path(__file__).parent / "fixtures" / "planning_repo"
+
+
+@pytest.mark.parametrize(("details", "expected"), [
+    (["missing_required_field"], "schema_missing_required_field"),
+    (["incorrect_field_type"], "schema_incorrect_field_type"),
+    (["invalid_enum_value"], "schema_invalid_enum_value"),
+    (["excessive_item_count"], "schema_excessive_item_count"),
+    (["missing_required_field", "invalid_enum_value"], "schema_validation_failed"),
+    (["unrecognized_internal_detail"], "schema_validation_failed"),
+])
+def test_validation_category_mapping_is_bounded(details, expected):
+    assert _telemetry_validation_category(details) == expected
 
 
 def make_client(tmp_path: Path, *, provider="mock", **settings_overrides) -> TestClient:
@@ -160,7 +173,7 @@ def test_harmful_task_is_rejected_before_nebius_inference(tmp_path):
         ("[]", "incorrect_json_root_type", "invalid_task_plan"),
         ('{"status":"planned","private_value":"DO_NOT_LOG"}', "missing_required_field", "invalid_task_plan"),
         (
-            json.dumps({"status": "planned", "relevant_files": {"private": "DO_NOT_LOG"}}),
+            json.dumps({"status": "planned", "relevant_files": {"private": "DO_NOT_LOG"}, "source_references": [], "implementation_steps": [], "expected_code_changes": [], "risks": [], "dependencies": [], "validation_requirements": [], "assumptions": []}),
             "incorrect_field_type", "invalid_task_plan",
         ),
         ('{"status":"DO_NOT_LOG","relevant_files":[],"source_references":[],"implementation_steps":[],"expected_code_changes":[],"risks":[],"dependencies":[],"validation_requirements":[],"assumptions":[]}', "invalid_enum_value", "invalid_task_plan"),
@@ -181,12 +194,25 @@ def test_invalid_provider_plan_has_safe_structured_diagnostics(tmp_path, capsys,
         response = client.post("/api/v1/tasks/plan", json={
             "repository_id": "planning-fixture", "task_description": "Investigate the package service behavior"
         })
+        attempt = client.app.state.inference_telemetry.list_recent(limit=1).records[0].model_dump()
     assert response.status_code == 502
     assert response.json()["error"]["code"] == public_code
     logs = capsys.readouterr().err
     assert diagnostic in logs
     assert "DO_NOT_LOG" not in logs
     assert "DO_NOT_LOG" not in response.text
+    expected_category = {
+        "invalid_json_syntax": "invalid_json_syntax",
+        "incorrect_json_root_type": "incorrect_json_root_type",
+        "missing_required_field": "schema_missing_required_field",
+        "incorrect_field_type": "schema_incorrect_field_type",
+        "invalid_enum_value": "schema_invalid_enum_value",
+        "excessive_item_count": "schema_excessive_item_count",
+        "empty_model_content": "empty_model_content",
+    }[diagnostic]
+    assert attempt["plan_validation_status"] == "failed"
+    assert attempt["plan_validation_failure_category"] == expected_category
+    assert "DO_NOT_LOG" not in str(attempt)
 
 
 def test_schema_valid_plan_with_unknown_evidence_is_rejected_as_insufficient_context(tmp_path, capsys):
@@ -365,8 +391,10 @@ def test_live_provider_structured_plan_returns_only_safe_diagnostics(tmp_path):
     assert body["status"] == "planned"
     assert body["provider"] == "nebius" and body["is_mock"] is False
     assert body["human_approval_required"] is True and body["execution_status"] == "not_started"
-    assert body["inference_diagnostics"] == {
-        "provider": "nebius", "model": "nvidia/Nemotron-3_5-Lightning", "is_mock": False,
+    diagnostics = body["inference_diagnostics"]
+    assert diagnostics == {
+        "provider": "nebius", "run_id": diagnostics["run_id"], "provider_http_status": None,
+        "model": "nvidia/Nemotron-3_5-Lightning", "provider_reported_model": "nvidia/Nemotron-3_5-Lightning", "is_mock": False,
         "completion_status": "completed", "finish_reason": "stop",
         "model_reported_by_provider": True, "latency_ms": 275,
         "usage": {"input_tokens": 280, "output_tokens": 192, "reasoning_tokens": 72, "total_tokens": 472},
@@ -404,6 +432,8 @@ def test_planner_uses_compact_json_instructions_and_gates_optional_thinking_cont
             "exactly one JSON object matching this shape", "No Markdown", "at most 4 steps",
             "5 files", "5 top-level references", "20 references per step", "4 risks", "4 validation requirements",
             "3 assumptions", "Include every key", "status must be exactly one of planned, insufficient_context, or unsupported",
+            "Array limits are hard caps", "Never exceed a cap", "Prefer no more than 3 steps, 3 files, 3 top-level references",
+            "2 references per step or finding", "Omit lower-priority items instead of exceeding a limit",
             '"implementation_steps":[{"step":1,"description":"text","source_references":[]}]',
             "positive integer line", "Step descriptions must be 1-1000 characters",
             "expected-code-change descriptions must be 1-500 characters",

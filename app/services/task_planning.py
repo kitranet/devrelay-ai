@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import ModelEmptyResponseError, ModelIncompleteResponseError, ModelProviderError, SensitiveInferenceContentError, TaskPlanValidationError, TaskPlanningContextLimitError, TaskPlanningTimeoutError
-from app.models.inference import ChatMessage, InferenceRequest, InferenceResponse, diagnostics_for
+from app.models.inference import ChatMessage, InferenceRequest, InferenceResponse, PlanValidationFailureCategory, diagnostics_for
 from app.models.repository import RepositoryAnalysisResponse, SourceExcerpt, SourceReference
 from app.models.task import PlanFinding, PlanGeneration, PlanStep, TaskPlan, TaskPlanningRequest
 from app.services.inference import InferenceService
@@ -127,6 +127,18 @@ def _validation_diagnostics(error: ValidationError) -> tuple[list[str], list[dic
     if not categories:
         categories.add("schema_constraint_failed")
     return sorted(categories), details
+
+
+def _telemetry_validation_category(categories: list[str]) -> PlanValidationFailureCategory:
+    """Map detailed Pydantic errors to one bounded, content-free telemetry value."""
+    if len(categories) != 1:
+        return "schema_validation_failed"
+    return {
+        "missing_required_field": "schema_missing_required_field",
+        "incorrect_field_type": "schema_incorrect_field_type",
+        "invalid_enum_value": "schema_invalid_enum_value",
+        "excessive_item_count": "schema_excessive_item_count",
+    }.get(categories[0], "schema_validation_failed")
 
 
 def _log_plan_validation_failure(
@@ -251,6 +263,8 @@ class TaskPlanningService:
                 raise TaskPlanningContextLimitError()
             if _contains_sensitive_text(encoded, configured_key):
                 raise SensitiveInferenceContentError()
+            task_id = str(uuid.uuid4())
+            run_id = str(uuid.uuid4())
             inference = await asyncio.wait_for(
                 self.inference.generate(InferenceRequest(messages=[
                     ChatMessage(role="system", content=(
@@ -276,9 +290,12 @@ class TaskPlanningService:
                         "treated as a line-only citation and is valid only when that exact start line is analyzed. "
                         "Step descriptions must be 1-1000 characters; "
                         "expected-code-change descriptions must be 1-500 characters. "
-                        "Use at most 4 steps, 5 files, 5 top-level references, 20 references per step, "
-                        "5 expected changes, 4 risks, 4 dependencies, "
-                        "4 validation requirements, 3 assumptions, 6 findings, and 6 unresolved questions. Keep text brief. "
+                        "Array limits are hard caps: use at most 4 steps, 5 files, 5 top-level references, "
+                        "20 references per step, 5 expected changes, 4 risks, 4 dependencies, "
+                        "4 validation requirements, 3 assumptions, 6 findings, and 6 unresolved questions. "
+                        "Never exceed a cap. Prefer no more than 3 steps, 3 files, 3 top-level references, "
+                        "2 references per step or finding, 2 expected changes, and 3 items in each narrative array. "
+                        "Omit lower-priority items instead of exceeding a limit; deduplicate citations and keep each item brief. "
                         "Each finding must be classified observed or suspected; observed means directly visible in supplied "
                         "source evidence, while suspected is an unverified interpretation. Cite findings with exact references. "
                         "Only cite exact path and line ranges present in source_references or source_excerpts. "
@@ -289,6 +306,7 @@ class TaskPlanningService:
                     )),
                     ChatMessage(role="user", content="DEVRELAY_PLAN_REQUEST\n" + encoded),
                 ], max_tokens=self.settings.nebius_max_output_tokens,
+                    run_id=run_id, repository_id=request.repository_id, task_id=task_id,
                     json_mode=(
                         self.settings.inference_provider == "nebius"
                         and self.settings.nebius_model == "nvidia/Nemotron-3_5-Lightning"
@@ -301,24 +319,39 @@ class TaskPlanningService:
                 timeout=self.settings.task_planning_timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
+            if 'run_id' in locals() and hasattr(self.inference, "_telemetry") and self.inference._telemetry:
+                self.inference._telemetry.mark_timeout(run_id, duration_ms=None)
             raise TaskPlanningTimeoutError() from exc
+        telemetry = getattr(self.inference, "_telemetry", None)
+        run_id = getattr(inference, "run_id", run_id)
+
+        def mark_invalid(category: PlanValidationFailureCategory) -> None:
+            if telemetry:
+                telemetry.mark_plan_validation(
+                    run_id, plan_valid=False, citations_valid=None, failure_category=category,
+                )
         configured_key = self.settings.nebius_api_key.get_secret_value() if self.settings.nebius_api_key else None
         if (
             inference.provider != self.settings.inference_provider
             or inference.is_mock != (self.settings.inference_provider == "mock")
         ):
+            mark_invalid("provider_metadata_mismatch")
             raise ModelProviderError("Inference provider metadata did not match the configured provider.")
         if _contains_sensitive_text(inference.content, configured_key):
+            mark_invalid("sensitive_content_rejected")
             raise SensitiveInferenceContentError()
         if inference.completion_status != "completed":
+            mark_invalid("incomplete_response")
             raise ModelIncompleteResponseError()
         if not inference.content.strip():
             _log_plan_validation_failure(provider=inference.provider, category="empty_model_content")
+            mark_invalid("empty_model_content")
             raise ModelEmptyResponseError()
         try:
             decoded = json.loads(inference.content)
         except json.JSONDecodeError:
             _log_plan_validation_failure(provider=inference.provider, category="invalid_json_syntax")
+            mark_invalid("invalid_json_syntax")
             raise TaskPlanValidationError() from None
         if not isinstance(decoded, dict):
             root_type = (
@@ -329,6 +362,7 @@ class TaskPlanningService:
             _log_plan_validation_failure(
                 provider=inference.provider, category="incorrect_json_root_type", root_type=root_type
             )
+            mark_invalid("incorrect_json_root_type")
             raise TaskPlanValidationError()
         try:
             generation = PlanGeneration.model_validate(decoded)
@@ -339,11 +373,14 @@ class TaskPlanningService:
                 category="pydantic_validation_failed:" + ",".join(categories),
                 field_errors=field_errors,
             )
+            mark_invalid(_telemetry_validation_category(categories))
             raise TaskPlanValidationError() from None
 
         if generation.status == "unsupported":
+            if telemetry:
+                telemetry.mark_plan_validation(run_id, plan_valid=True, citations_valid=None)
             return _validated_result(TaskPlan(
-                task_id=str(uuid.uuid4()), repository_id=request.repository_id,
+                task_id=task_id, repository_id=request.repository_id,
                 task_description=request.task_description, status="unsupported",
                 human_approval_required=True, provider=inference.provider, is_mock=inference.is_mock,
                 assumptions=["The configured provider does not have a defined response for this request."],
@@ -353,9 +390,23 @@ class TaskPlanningService:
         if inference.provider == "nebius" and (
             inference.model != self.settings.nebius_model or not inference.model_reported_by_provider
         ):
+            mark_invalid("model_identity_unverified")
             raise ModelProviderError("Nebius model identity could not be verified against the configured model.")
 
         validated = self._validate_evidence(generation, request, analysis, inference, excerpts)
+        if telemetry:
+            all_validated_references = [
+                *validated.source_references,
+                *(reference for step in validated.implementation_steps for reference in step.source_references),
+                *(reference for finding in validated.findings for reference in finding.source_references),
+            ]
+            verified_count = len({(item.path, item.line, item.end_line) for item in all_validated_references})
+            unsupported_count = len(set(validated.unsupported_references))
+            telemetry.mark_plan_validation(
+                run_id, plan_valid=True, citations_valid=unsupported_count == 0,
+                verified_count=verified_count, unsupported_count=unsupported_count,
+            )
+        validated.task_id = task_id
         validated.source_excerpts = excerpts
         return _validated_result(validated, analysis)
 

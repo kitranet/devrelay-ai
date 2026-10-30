@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { randomBytes } from "node:crypto";
-import { mkdir, copyFile, stat } from "node:fs/promises";
+import { access, mkdir, copyFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -11,7 +11,9 @@ import { chromium } from "playwright";
 if (process.env.DEVRELAY_LIVE_DEMO_AUTHORIZED !== "YES") {
   throw new Error("Set DEVRELAY_LIVE_DEMO_AUTHORIZED=YES only after separately authorizing one live planning request.");
 }
-if (!process.env.NEBIUS_API_KEY) throw new Error("A Nebius credential is not configured in this process; no request was made.");
+// The backend loads the credential from its local .env when it starts from the
+// repository root. Keep it out of the Node/Next process and verify presence via
+// the backend's sanitized inference-status response before any planning call.
 
 const frontendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = path.resolve(frontendDir, "..");
@@ -19,7 +21,7 @@ const width = 1920;
 const height = 1080;
 const siteOrigin = "http://127.0.0.1:3000";
 const apiOrigin = "http://127.0.0.1:8001";
-const taskDescription = "Investigate why the 02:00 ingestion job can publish a successful report with fewer rows than the inbound batch. Trace orchestration, validation, transformation, retry, configuration, and publication behavior across the repository. Propose safe investigation steps, evidence to collect, and regression checks. Do not assume the root cause, change repository files, or execute code.";
+const taskDescription = "Investigate why Northstar's 02:00 ingestion job can report success while publishing fewer rows than arrived when an inbound record has a malformed amount. Trace accepted and rejected counts through orchestration to the publish decision; verify whether the configured validity threshold and run status are enforced. Distinguish directly observed behavior from assumptions. Provide no more than 3 investigation steps, 3 regression tests, and citations to the strongest source excerpts. Do not invent a partial-batch policy, modify repository files, or execute code.";
 const runId = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
 const outputDir = path.join(repositoryRoot, "demo-recordings", `continuity-live-${runId}`);
 const browserVideoDir = path.join(outputDir, "browser-video");
@@ -40,7 +42,7 @@ const backendEnvironment = {
   NEBIUS_LIVE_INFERENCE_ENABLED: "true",
   NEBIUS_MODEL: "nvidia/Nemotron-3_5-Lightning",
   NEBIUS_PLANNING_DISABLE_THINKING: "true",
-  NEBIUS_MAX_OUTPUT_TOKENS: "1024",
+  NEBIUS_MAX_OUTPUT_TOKENS: "2048",
   NEBIUS_MAX_PROMPT_TOKENS: "6000",
   NEBIUS_TIMEOUT_SECONDS: "30",
   NEBIUS_MAX_IN_FLIGHT_REQUESTS: "1",
@@ -118,6 +120,102 @@ async function waitUntil(startedAt, elapsedMs) {
   if (remaining > 0) await delay(remaining);
 }
 
+async function addRecordingPointer(page) {
+  await page.addStyleTag({ content: `
+    html, body, body * { cursor: none !important; }
+    #devrelay-recording-pointer { position: fixed; left: 0; top: 0; z-index: 2147483647;
+      width: 15px; height: 15px; border: 2px solid #fff; border-radius: 50%;
+      background: #c47d20; box-shadow: 0 0 0 3px rgba(28,48,42,.88), 0 2px 8px rgba(0,0,0,.45);
+      transform: translate(-50%,-50%); pointer-events: none; transition: width 100ms, height 100ms; }
+    #devrelay-recording-pointer::before { content: ""; position: absolute; inset: -13px; border: 2px solid rgba(196,125,32,.78); border-radius: 50%; }
+    #devrelay-recording-pointer.is-clicking { width: 21px; height: 21px; background: #16765f; }
+    #devrelay-recording-pointer.is-clicking::before { inset: -19px; border-color: #16765f; }
+  ` });
+  await page.evaluate(() => {
+    const pointer = document.createElement("div");
+    pointer.id = "devrelay-recording-pointer";
+    document.body.append(pointer);
+    document.addEventListener("mousemove", (event) => {
+      pointer.style.left = `${event.clientX}px`;
+      pointer.style.top = `${event.clientY}px`;
+    }, true);
+    document.addEventListener("mousedown", () => {
+      pointer.classList.add("is-clicking");
+      window.setTimeout(() => pointer.classList.remove("is-clicking"), 240);
+    }, true);
+  });
+  await page.mouse.move(960, 100);
+}
+
+async function circleTarget(page, locator, radius = 34) {
+  await locator.scrollIntoViewIfNeeded();
+  const bounds = await locator.boundingBox();
+  if (!bounds) throw new Error("A visible demo target could not be located.");
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  for (let index = 0; index <= 12; index += 1) {
+    const angle = (index / 12) * Math.PI * 2;
+    await page.mouse.move(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius, { steps: 2 });
+    await delay(45);
+  }
+  await page.mouse.move(centerX, centerY, { steps: 4 });
+  await delay(180);
+}
+
+async function guidedClick(page, locator) {
+  await circleTarget(page, locator);
+  await locator.click();
+}
+
+async function readJsonResponse(response, label) {
+  let body;
+  try { body = await response.json(); }
+  catch { throw new Error(`${label} returned non-JSON content (HTTP ${response.status}).`); }
+  if (!response.ok) {
+    const code = typeof body?.error?.code === "string" ? body.error.code : "unknown_error";
+    throw new Error(`${label} failed (HTTP ${response.status}, ${code}).`);
+  }
+  return body;
+}
+
+async function showRejectedAttempt() {
+  const attempt = await page.evaluate(async () => {
+    const response = await fetch("/api/backend/api/v1/inference/attempts?limit=1&repository_id=continuity-pipeline-fixture", { cache: "no-store" });
+    if (!response.ok) return null;
+    const history = await response.json();
+    return history.records?.[0] ?? null;
+  }).catch(() => null);
+  const safeAttempt = attempt && {
+    provider: attempt.provider,
+    model: attempt.model,
+    request_status: attempt.request_status,
+    provider_http_status: attempt.provider_http_status,
+    finish_reason: attempt.finish_reason,
+    plan_validation_status: attempt.plan_validation_status,
+    plan_validation_failure_category: attempt.plan_validation_failure_category,
+    citation_validation_status: attempt.citation_validation_status,
+    input_tokens: attempt.input_tokens,
+    output_tokens: attempt.output_tokens,
+    duration_ms: attempt.duration_ms,
+    estimated_cost_usd: attempt.estimated_cost_usd,
+  };
+  if (safeAttempt) console.log(JSON.stringify({ stage: "plan_rejected_or_unverified", ...safeAttempt }));
+  const failureBanner = page.locator(".error-banner[role=alert]");
+  if (await failureBanner.count()) await failureBanner.scrollIntoViewIfNeeded();
+  const historyHeading = page.getByRole("heading", { name: "Inference runs and estimated cost", exact: true });
+  if (safeAttempt) {
+    await historyHeading.scrollIntoViewIfNeeded();
+    const runRow = page.locator(".usage-table tbody tr").first();
+    await runRow.waitFor({ timeout: 8_000 }).catch(() => {});
+    await runRow.scrollIntoViewIfNeeded().catch(() => {});
+    const visibleCategory = safeAttempt.plan_validation_failure_category?.replaceAll("_", " ");
+    if (safeAttempt.plan_validation_status === "failed" && visibleCategory) {
+      await page.getByText(`Rejected: ${visibleCategory}`, { exact: true }).waitFor({ timeout: 5_000 }).catch(() => {});
+    }
+  }
+  await delay(8_000);
+}
+
 async function stopChildren() {
   for (const child of [...children].reverse()) if (child.exitCode === null && child.signalCode === null) child.kill();
   await Promise.all(children.map((child) => new Promise((resolve) => {
@@ -148,7 +246,11 @@ async function run() {
   const authorization = Buffer.from(`continuity-recording:${recordingPassword}`).toString("base64");
   await waitFor(`${siteOrigin}/`, "Authenticated dashboard", { Authorization: `Basic ${authorization}` });
 
-  browser = await chromium.launch({ headless: true });
+  const chromiumPath = process.env.DEVRELAY_CHROMIUM_EXECUTABLE;
+  if (chromiumPath) await access(chromiumPath);
+  browser = await chromium.launch(chromiumPath
+    ? { headless: true, executablePath: chromiumPath }
+    : { headless: true });
   context = await browser.newContext({
     viewport: { width, height }, screen: { width, height }, deviceScaleFactor: 1,
     httpCredentials: { username: "continuity-recording", password: recordingPassword },
@@ -157,19 +259,21 @@ async function run() {
   page = await context.newPage();
   page.setDefaultTimeout(20_000);
   await page.goto(siteOrigin, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.getByRole("heading", { name: /Good work starts with context/i }).waitFor();
+  await page.getByRole("heading", { name: /Carry the investigation forward/i }).waitFor();
   await page.getByText("FastAPI is responding", { exact: true }).waitFor();
   if (await page.getByRole("combobox", { name: "Select configured repository" }).inputValue() !== "continuity-pipeline-fixture") {
     throw new Error("The dashboard did not select the authorized synthetic continuity fixture.");
   }
+  await addRecordingPointer(page);
 
   const startedAt = Date.now();
   // 0:00–0:25 — Set up the handoff problem and authorized workspace.
+  await circleTarget(page, page.getByRole("heading", { name: "Successful runs are publishing fewer rows than arrived." }));
   await waitUntil(startedAt, 25_000);
   // 0:25–0:50 — Static repository analysis and module/import discovery.
-  await page.getByRole("button", { name: /Analyze repository/ }).click();
+  await guidedClick(page, page.getByRole("button", { name: /Analyze repository/ }));
   await page.getByText("Analysis complete", { exact: false }).waitFor();
-  await page.getByText("Imports & dependency manifests", { exact: false }).click();
+  await guidedClick(page, page.getByText("Imports & dependency manifests", { exact: false }));
   await page.getByText("requirements.txt", { exact: true }).waitFor();
   await waitUntil(startedAt, 50_000);
   // 0:50–1:25 — This is the sole live paid planning request in the script.
@@ -181,20 +285,70 @@ async function run() {
       planRequestBody = request.postData();
     }
   });
-  await page.locator("#task-description").fill(taskDescription);
-  await page.getByRole("button", { name: /Generate plan/ }).click();
-  await page.getByText("AI-generated planning result; source evidence was validated locally.", { exact: true }).waitFor({ timeout: 70_000 });
-  await page.getByText("nvidia/Nemotron-3_5-Lightning", { exact: true }).waitFor();
-  if (await page.getByText("Provider: nebius", { exact: false }).count() === 0) throw new Error("The displayed plan did not identify Nebius; recording aborted without a retry.");
-  if (await page.getByText("MOCK MODE", { exact: false }).count() > 0) throw new Error("A mock response appeared in the live recording; recording stopped.");
+  const taskInput = page.locator("#task-description");
+  await taskInput.fill("");
+  await taskInput.click({ position: { x: 12, y: 12 } });
+  await circleTarget(page, taskInput, 48);
+  await taskInput.pressSequentially(taskDescription, { delay: 4, timeout: 45_000 });
+  const planResponsePromise = page.waitForResponse((response) =>
+    response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/api/backend/api/v1/tasks/plan"),
+    { timeout: 90_000 },
+  );
+  await guidedClick(page, page.getByRole("button", { name: /Generate plan/ }));
+  let planResponse;
+  try {
+    planResponse = await planResponsePromise;
+  } catch {
+    await showRejectedAttempt();
+    throw new Error("The single planning request did not produce a browser response within 90 seconds; no retry was made.");
+  }
+  let plan;
+  try {
+    plan = await readJsonResponse(planResponse, "Planning request");
+  } catch (error) {
+    await page.getByRole("alert").waitFor({ timeout: 5_000 }).catch(() => {});
+    await showRejectedAttempt();
+    throw error;
+  }
   if (planRequestCount !== 1) throw new Error("The live plan request count was not exactly one; recording stopped without another request.");
   const submittedPlan = JSON.parse(planRequestBody ?? "{}");
   if (submittedPlan.repository_id !== "continuity-pipeline-fixture" || submittedPlan.task_description !== taskDescription) {
     throw new Error("The submitted planning request did not match the configured synthetic scenario.");
   }
-  if (await page.getByText("Unverified citations — rejected by source validation", { exact: true }).count() > 0) {
-    throw new Error("The plan included rejected source citations; recording stopped.");
+  const diagnostics = plan.inference_diagnostics;
+  if (plan.provider !== "nebius" || plan.is_mock !== false || diagnostics?.model !== "nvidia/Nemotron-3_5-Lightning") {
+    await showRejectedAttempt();
+    throw new Error("The returned plan did not confirm the authorized provider and model; recording stopped.");
   }
+  await page.locator(".plan-result").waitFor();
+  await page.getByText("nvidia/Nemotron-3_5-Lightning", { exact: true }).waitFor();
+  if (plan.status !== "planned" || plan.unsupported_references.length !== 0 ||
+      plan.source_references.length === 0 || plan.source_excerpts.length === 0) {
+    await delay(12_000);
+    throw new Error(`The one live response was not an evidence-complete plan (status=${plan.status}, verified=${plan.source_references.length}, unsupported=${plan.unsupported_references.length}); no retry was made.`);
+  }
+  if (plan.human_approval_required !== true || plan.execution_status !== "not_started") {
+    throw new Error("The plan did not preserve the human-review and not-started execution boundaries.");
+  }
+  console.log(JSON.stringify({
+    stage: "validated_live_plan",
+    provider: plan.provider,
+    model: diagnostics.model,
+    status: plan.status,
+    finish_reason: diagnostics.finish_reason,
+    latency_ms: diagnostics.latency_ms,
+    usage: diagnostics.usage,
+    verified_references: plan.source_references.length,
+    unsupported_references: plan.unsupported_references.length,
+    findings: plan.findings.length,
+    steps: plan.implementation_steps.length,
+    human_approval_required: plan.human_approval_required,
+    execution_status: plan.execution_status,
+  }));
+  const renderedDiagnostics = page.locator(".inference-diagnostics").filter({ hasText: diagnostics.model });
+  await renderedDiagnostics.waitFor();
+  await circleTarget(page, renderedDiagnostics);
+  if (await page.getByText("MOCK MODE", { exact: false }).count() > 0) throw new Error("A mock response appeared in the live recording; recording stopped.");
   const evidenceSection = page.locator(".plan-result .data-section").filter({
     has: page.getByRole("heading", { name: "Supporting evidence", exact: true }),
   });
@@ -205,19 +359,30 @@ async function run() {
   // 1:25–1:50 — Show the actually returned evidence and its observed/suspected labels.
   const evidence = page.getByText("Supporting evidence", { exact: true });
   await evidence.scrollIntoViewIfNeeded();
+  await circleTarget(page, evidence);
+  const firstExcerpt = page.locator(".plan-result details.inspect-details").first();
+  await firstExcerpt.waitFor();
+  await guidedClick(page, firstExcerpt.locator("summary"));
+  await firstExcerpt.locator("pre code").waitFor();
   await page.getByText("Findings", { exact: true }).scrollIntoViewIfNeeded();
+  await circleTarget(page, page.getByText("Findings", { exact: true }));
   await waitUntil(startedAt, 110_000);
   // 1:50–2:15 — Keep plan review distinct from code approval.
   await page.getByRole("heading", { name: "Plan review" }).scrollIntoViewIfNeeded();
   await page.getByText("This records review of the investigation plan only.", { exact: false }).waitFor();
   await waitUntil(startedAt, 135_000);
   // 2:15–2:40 — Create and show a plan-only handoff, explicitly still unreviewed.
-  await page.getByRole("button", { name: "Create plan-only handoff" }).click();
+  await guidedClick(page, page.getByRole("button", { name: "Create plan-only handoff" }));
   await page.getByText("Unreviewed handoff · awaiting human review", { exact: true }).waitFor();
   await page.getByText("Runtime validation:", { exact: false }).scrollIntoViewIfNeeded();
   await waitUntil(startedAt, 160_000);
-  // 2:40–2:50 — End on the no-patch/no-execution boundary.
-  await page.getByText("No patch was proposed", { exact: false }).scrollIntoViewIfNeeded();
+  // 2:40–2:50 — Show this real run's locally recorded token/cost estimate.
+  await page.getByRole("link", { name: "Run history", exact: true }).click();
+  await page.getByRole("button", { name: "Refresh history", exact: true }).click();
+  const recordedRun = page.locator(".usage-table tbody tr").filter({ hasText: plan.task_id.slice(0, 8) });
+  await recordedRun.waitFor();
+  await recordedRun.getByText("Nebius Token Factory", { exact: true }).waitFor();
+  await recordedRun.scrollIntoViewIfNeeded();
   await waitUntil(startedAt, 170_000);
   complete = true;
 }

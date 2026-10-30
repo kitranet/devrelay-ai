@@ -56,6 +56,7 @@ def run_evaluation() -> dict[str, object]:
             environment="development",
             inference_provider="mock",
             nebius_api_key=None,
+            inference_telemetry_db_path=Path(temp_dir) / "inference-attempts.sqlite3",
             enable_local_reviews=False,
             enable_isolated_runtime_validation=False,
             authorized_repositories={REPOSITORY_ID: root},

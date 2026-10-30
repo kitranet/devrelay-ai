@@ -4,6 +4,7 @@ import { authorizeDemoRequest } from "@/lib/server/demo-auth";
 const ROUTES = new Map<string, { method: "GET" | "POST"; upstream: string }>([
   ["health", { method: "GET", upstream: "/health" }],
   ["api/v1/inference/status", { method: "GET", upstream: "/api/v1/inference/status" }],
+  ["api/v1/inference/attempts", { method: "GET", upstream: "/api/v1/inference/attempts" }],
   ["api/v1/repositories/analyze", { method: "POST", upstream: "/api/v1/repositories/analyze" }],
   ["api/v1/tasks/plan", { method: "POST", upstream: "/api/v1/tasks/plan" }],
   ["api/v1/proposals/create", { method: "POST", upstream: "/api/v1/proposals/create" }],

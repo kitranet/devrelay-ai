@@ -34,6 +34,24 @@ describe("local backend proxy", () => {
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it("exposes inference attempt history only through the authenticated GET allowlist", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{"records":[]}', {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    process.env.BACKEND_API_URL = "http://127.0.0.1:8001";
+    const authorized = await GET(authorizedRequest("http://localhost/api/backend/api/v1/inference/attempts"), {
+      params: Promise.resolve({ path: ["api", "v1", "inference", "attempts"] }),
+    });
+    expect(authorized.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://127.0.0.1:8001/api/v1/inference/attempts");
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toBeUndefined();
+    const unauthenticated = await GET(new NextRequest("http://localhost/api/backend/api/v1/inference/attempts"), {
+      params: Promise.resolve({ path: ["api", "v1", "inference", "attempts"] }),
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it("forwards only the repository analysis endpoint to the configured loopback backend", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{"summary":{"repository_id":"planning-fixture"}}', {
       status: 200, headers: { "Content-Type": "application/json" },

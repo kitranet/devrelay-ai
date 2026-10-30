@@ -46,6 +46,14 @@ class InferenceQuotaUnavailableError(ApplicationError):
         super().__init__("Live inference is unavailable because request accounting could not be verified.")
 
 
+class InferenceTelemetryUnavailableError(ApplicationError):
+    status_code = 503
+    code = "inference_telemetry_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("Inference is unavailable because run accounting could not be verified.")
+
+
 class ModelTimeoutError(ApplicationError):
     status_code = 504
     code = "model_timeout"

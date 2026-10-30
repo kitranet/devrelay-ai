@@ -1,4 +1,4 @@
-import type { ApiError, CodeChangeProposal, HandoffReport, HealthResponse, InferenceStatus, LocalReviewStatus, PlanOnlyHandoffReport, PlanReviewDecision, PlanReviewHistory, PlanReviewRecord, RepositoryAnalysis, ReviewDecision, ReviewHistory, ReviewRecord, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
+import type { ApiError, CodeChangeProposal, HandoffReport, HealthResponse, InferenceAttemptHistory, InferenceStatus, LocalReviewStatus, PlanOnlyHandoffReport, PlanReviewDecision, PlanReviewHistory, PlanReviewRecord, RepositoryAnalysis, ReviewDecision, ReviewHistory, ReviewRecord, RuntimeValidationEvidence, SandboxReadiness, TaskPlan } from "@/lib/types";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -26,7 +26,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
       empty_model_response: "The inference provider returned no final answer. No plan was accepted.",
       invalid_model_response: "Nebius returned an invalid response. No plan was accepted.",
       task_planning_timeout: "Nebius planning timed out. No automatic retry was made; review the request before trying again.",
-      invalid_task_plan: "The inference provider returned a response that did not match the required plan format. No plan was accepted.",
+      invalid_task_plan: "Planning stopped because the response did not pass required plan validation. No plan or citations were accepted, and no handoff was created.",
       inference_limit_exceeded: "This request exceeds a local inference budget or concurrency limit. No paid request was sent.",
       sensitive_inference_content: "Planning stopped because the input or response contains credential-like content. Remove secrets before trying again.",
       missing_credentials: "Nebius inference is not configured with an API key. No mock fallback was used.",
@@ -44,6 +44,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const checkBackend = () => requestJson<HealthResponse>("health");
 export const getInferenceStatus = () => requestJson<InferenceStatus>("api/v1/inference/status");
+export const getInferenceAttempts = () => requestJson<InferenceAttemptHistory>("api/v1/inference/attempts?limit=30");
 
 export const analyzeRepository = (repositoryId: string) =>
   requestJson<RepositoryAnalysis>("api/v1/repositories/analyze", {

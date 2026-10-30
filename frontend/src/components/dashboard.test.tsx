@@ -23,8 +23,8 @@ const disabledSandboxReadiness = {
 
 function routeFetch(responses: Record<string, unknown | Response>, reviewStatus = disabledReviewStatus, sandboxReadiness: SandboxReadiness = disabledSandboxReadiness) {
   return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>((input) => {
-    const key = String(input).replace("/api/backend/", "");
-    const value = key === "health" ? { status: "ok" } : key === "api/v1/inference/status" ? { provider: "mock", live_inference_enabled: false, credentials_configured: false, quota_status: "not_applicable", quota_total: null, quota_used: null, quota_remaining: null } : key === "api/v1/reviews/status" ? reviewStatus : key === "api/v1/runtime-validation/readiness" ? sandboxReadiness : responses[key];
+    const key = String(input).replace("/api/backend/", "").split("?")[0];
+    const value = responses[key] !== undefined ? responses[key] : key === "health" ? { status: "ok" } : key === "api/v1/inference/status" ? { provider: "mock", live_inference_enabled: false, credentials_configured: false, quota_status: "not_applicable", quota_total: null, quota_used: null, quota_remaining: null } : key === "api/v1/inference/attempts" ? { records: [], retention_days: 90, maximum_records: 5000, billing_information: "unavailable" } : key === "api/v1/reviews/status" ? reviewStatus : key === "api/v1/runtime-validation/readiness" ? sandboxReadiness : responses[key];
     return Promise.resolve(value instanceof Response ? value : jsonResponse(value ?? {}));
   });
 }
@@ -55,6 +55,22 @@ const taskPlan = {
   execution_status: "not_started", assumptions: [], unsupported_references: [], source_excerpts: [], findings: [], unresolved_questions: [], provider: "mock", is_mock: true,
   inference_diagnostics: { provider: "mock", model: "devrelay-mock-v1", is_mock: true, completion_status: "completed", finish_reason: "mock_complete", model_reported_by_provider: true, latency_ms: null, usage: null },
 };
+
+const unknownUsageHistory = { records: [{
+  run_id: "11111111-1111-4111-8111-111111111111", timestamp: "2026-10-25T00:00:00Z",
+  repository_id: "continuity-pipeline-fixture", task_id: "22222222-2222-4222-8222-222222222222",
+  provider: "nebius" as const, model: "nvidia/Nemotron-3_5-Lightning", provider_reported_model: null,
+  request_status: "timeout" as const, provider_http_status: null, error_code: "model_timeout",
+  started_at: "2026-10-25T00:00:00Z", ended_at: null, duration_ms: null,
+  input_tokens: null, output_tokens: null, reasoning_tokens: null, total_tokens: null, finish_reason: null,
+  pricing_model: "per_million_input_output_tokens", price_per_million_input_tokens: "0.06",
+  price_per_million_output_tokens: "0.24", estimated_cost_usd: null, actual_billed_cost_usd: null,
+  billing_status: "unavailable" as const, pricing_source: null, pricing_as_of: "2026-10-25",
+  pricing_registry_version: "devrelay-model-prices-v1", citation_validation_status: "not_run" as const,
+  plan_validation_status: "not_run" as const, plan_validation_failure_category: null,
+  verified_reference_count: null, unsupported_reference_count: null,
+  provider_usage_received: false, quota_reservation_status: "reserved" as const,
+}], retention_days: 90, maximum_records: 5000, billing_information: "unavailable" as const };
 
 const liveTaskPlan = {
   ...taskPlan,
@@ -133,13 +149,34 @@ describe("DevRelay dashboard", () => {
 
   it("renders the dashboard identity, tools, and unavailable roadmap", async () => {
     render(<Dashboard />);
-    expect(screen.getByRole("heading", { name: /good work starts with context/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /carry the investigation forward/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /repository intelligence/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /engineering task planner/i })).toBeInTheDocument();
     expect(await screen.findByText("FastAPI is responding")).toBeInTheDocument();
     expect(await screen.findByText("Live inference disabled; deterministic mock, no external model calls.")).toBeInTheDocument();
     expect(screen.getByText("Safe code proposals")).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
+  });
+
+  it("shows missing usage and billing as unknown rather than zero", async () => {
+    vi.stubGlobal("fetch", routeFetch({ "api/v1/inference/attempts": unknownUsageHistory }));
+    render(<Dashboard />);
+    expect(await screen.findByRole("heading", { name: /inference runs and estimated cost/i })).toBeInTheDocument();
+    expect(await screen.findByText("unknown / unknown")).toBeInTheDocument();
+    expect(screen.getByText(/Actual billing: unavailable/)).toBeInTheDocument();
+  });
+
+  it("shows a sanitized plan-validation failure category in run history", async () => {
+    const failedHistory = {
+      ...unknownUsageHistory,
+      records: [{ ...unknownUsageHistory.records[0], request_status: "completed" as const,
+        provider_http_status: 200, plan_validation_status: "failed" as const,
+        plan_validation_failure_category: "schema_missing_required_field" as const }],
+    };
+    vi.stubGlobal("fetch", routeFetch({ "api/v1/inference/attempts": failedHistory }));
+    render(<Dashboard />);
+    expect(await screen.findByText("Plan: failed")).toBeInTheDocument();
+    expect(screen.getByText("Rejected: schema missing required field")).toBeInTheDocument();
   });
 
   it("shows backend connectivity failure and prevents unavailable actions", async () => {
@@ -472,7 +509,7 @@ describe("task-planning provider error messages", () => {
   it.each([
     ["incomplete_model_response", /stopped before producing a complete plan/],
     ["task_planning_timeout", /timed out.*No automatic retry/],
-    ["invalid_task_plan", /did not match the required plan format/],
+    ["invalid_task_plan", /did not pass required plan validation.*No plan or citations were accepted/],
     ["inference_limit_exceeded", /exceeds a local inference budget or concurrency limit/],
     ["model_provider_error", /could not complete the request.*no mock fallback/i],
     ["invalid_model_response", /invalid response/i],

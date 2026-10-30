@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     nebius_live_inference_enabled: bool = False
     nebius_total_inference_quota: int = Field(default=0, ge=0, le=100_000)
     nebius_quota_db_path: Path = Path(".devrelay-state/nebius-quota.sqlite3")
+    inference_telemetry_db_path: Path = Path(".devrelay-state/inference-attempts.sqlite3")
+    inference_telemetry_retention_days: int = Field(default=90, ge=1, le=365)
+    inference_pricing_overrides_json: str | None = None
     nebius_planning_disable_thinking: bool = False
     nebius_timeout_seconds: float = Field(default=30.0, gt=0, le=600)
     nebius_max_output_tokens: int = Field(default=1024, ge=1, le=4096)

@@ -9,6 +9,27 @@ export type InferenceStatus = {
   quota_remaining: number | null;
 };
 
+export type InferenceAttempt = {
+  run_id: string; timestamp: string; repository_id: string; task_id: string;
+  provider: "nebius" | "mock"; model: string;
+  provider_reported_model: string | null;
+  request_status: "in_progress" | "completed" | "provider_error" | "timeout" | "cancelled" | "blocked" | "interrupted";
+  provider_http_status: number | null; error_code: string | null; started_at: string;
+  ended_at: string | null; duration_ms: number | null;
+  input_tokens: number | null; output_tokens: number | null; reasoning_tokens: number | null; total_tokens: number | null;
+  finish_reason: string | null; pricing_model: string | null;
+  price_per_million_input_tokens: string | null; price_per_million_output_tokens: string | null;
+  estimated_cost_usd: string | null; actual_billed_cost_usd: string | null;
+  billing_status: "unavailable" | "not_applicable"; pricing_source: string | null;
+  pricing_as_of: string | null; pricing_registry_version: string | null;
+  citation_validation_status: "not_run" | "passed" | "failed";
+  plan_validation_status: "not_run" | "passed" | "failed";
+  plan_validation_failure_category: "provider_metadata_mismatch" | "sensitive_content_rejected" | "incomplete_response" | "empty_model_content" | "invalid_json_syntax" | "incorrect_json_root_type" | "schema_missing_required_field" | "schema_incorrect_field_type" | "schema_invalid_enum_value" | "schema_excessive_item_count" | "schema_validation_failed" | "model_identity_unverified" | null;
+  verified_reference_count: number | null; unsupported_reference_count: number | null;
+  provider_usage_received: boolean; quota_reservation_status: "not_required" | "not_reserved" | "reserved" | "unknown";
+};
+export type InferenceAttemptHistory = { records: InferenceAttempt[]; retention_days: number; maximum_records: number; billing_information: "unavailable" };
+
 export type SourceReference = {
   path: string;
   line: number;
@@ -77,7 +98,10 @@ export type TaskPlan = {
   is_mock: boolean;
   inference_diagnostics?: {
     provider: "nebius" | "mock";
+    run_id: string | null;
+    provider_http_status: number | null;
     model: string;
+    provider_reported_model: string | null;
     is_mock: boolean;
     completion_status: "completed";
     finish_reason: string | null;
