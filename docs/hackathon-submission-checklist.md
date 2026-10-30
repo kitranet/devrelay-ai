@@ -7,7 +7,7 @@ Checked against the [official Devpost overview](https://nebiusglobalaihackathon.
 - [ ] Complete and submit the Devpost entry before **2026-10-30 10:00 PDT** (17:00 UTC / 22:30 India Standard Time). Saving a draft is not the same as submitting the entry.
 - [ ] Select one of the listed tracks. **Best Apps and Agents** is the lower-overclaim fit for the current plan-and-handoff copilot. **Coding and Agentic Engineering** is also relevant as a developer tool, but the current product does not let Nemotron write, run, or test arbitrary code; disclose that limitation if selecting it.
 - [ ] Enter the project description and explain the features, intended user, and how the workflow operates.
-- [ ] Provide a URL to a working demo, hosted application, or test build. This is distinct from the source repository URL. A mock-only Windows source package with launcher scripts is being prepared as a downloadable fallback; it requires Python/Node and dependency downloads. It is not hosted and is not a precompiled installer. Confirm with organizers that this package qualifies before entering its archive URL. See [Windows test-build instructions](windows-test-build.md).
+- [ ] Provide a URL to a working demo, hosted application, or test build. This is distinct from the source repository URL. A [mock-only Windows source package](https://raw.githubusercontent.com/kitranet/devrelay-ai/acdf44d7a332e8762f29761dcd86ca775bf3c849/test-build-dist/DevRelay-AI-TestBuild.zip) with launcher scripts is available; it requires Python/Node and dependency downloads. It is not hosted and is not a precompiled installer. Confirm with organizers that this package qualifies before entering its URL. See [Windows test-build instructions](windows-test-build.md).
 - [ ] Provide a URL to the public source repository. Verify that it is publicly accessible, contains the required files, and displays the Apache-2.0 license in the repository’s About/license area.
 - [ ] Upload the final video to YouTube and make it **Public**. Add that public watch URL to Devpost. The local file is `demo-recordings/submission-recording.mp4`; it is 1920×1080 and 162.545 seconds (2:42.5). Listen through it once for voice clarity, synchronization, and accurate live-versus-mock language. Do not include copyrighted music or third-party marks without permission.
 - [ ] Provide feedback on Nebius Token Factory and the NVIDIA models/tools used. Keep it factual and based on your own experience.
@@ -48,7 +48,7 @@ The form asks for feedback on Nebius Token Factory and the NVIDIA technologies u
 
 ## Pre-submit access check
 
-- [ ] The public test-build archive downloads without authentication, and its instructions are verified on a clean Windows machine; it exposes only the synthetic fixture and uses mock inference.
+- [ ] The public test-build archive downloads without authentication, and its instructions are verified on a clean Windows machine; it exposes only the synthetic fixture and uses mock inference. Verify its SHA-256 using the [published checksum](https://raw.githubusercontent.com/kitranet/devrelay-ai/acdf44d7a332e8762f29761dcd86ca775bf3c849/test-build-dist/SHA256SUMS.txt).
 - [ ] The URL remains available and free to judges through 2026-12-23.
 - [ ] Login instructions work without sharing personal or production credentials; live paid inference is not available to judges unless separately budgeted and controlled.
 - [ ] The public GitHub repository contains the exact reviewed source, setup instructions, license, and no secrets or local state.

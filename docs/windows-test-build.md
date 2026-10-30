@@ -2,6 +2,8 @@
 
 This is a reproducible **local test build package**, not a hosted demo. The archive contains source and launch instructions; it does not bundle Python, Node.js, or third-party dependencies. Organizers should confirm that this format meets the separate demo/test-build URL requirement before it is entered on Devpost.
 
+**Download:** [DevRelay-AI-TestBuild.zip](https://raw.githubusercontent.com/kitranet/devrelay-ai/acdf44d7a332e8762f29761dcd86ca775bf3c849/test-build-dist/DevRelay-AI-TestBuild.zip) · [SHA-256 checksum](https://raw.githubusercontent.com/kitranet/devrelay-ai/acdf44d7a332e8762f29761dcd86ca775bf3c849/test-build-dist/SHA256SUMS.txt)
+
 ## What it runs
 
 - FastAPI on `127.0.0.1:8001` and production Next.js on `127.0.0.1:3000`.
