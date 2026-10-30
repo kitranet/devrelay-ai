@@ -7,7 +7,7 @@ Checked against the [official Devpost overview](https://nebiusglobalaihackathon.
 - [ ] Complete and submit the Devpost entry before **2026-10-30 10:00 PDT** (17:00 UTC / 22:30 India Standard Time). Saving a draft is not the same as submitting the entry.
 - [ ] Select one of the listed tracks. **Best Apps and Agents** is the lower-overclaim fit for the current plan-and-handoff copilot. **Coding and Agentic Engineering** is also relevant as a developer tool, but the current product does not let Nemotron write, run, or test arbitrary code; disclose that limitation if selecting it.
 - [ ] Enter the project description and explain the features, intended user, and how the workflow operates.
-- [ ] Provide a URL to a working demo, hosted application, or test build. This is distinct from the source repository URL. The current checkout is loopback-only and does not yet have a judge-accessible hosted demo or downloadable test build. **Do not submit the GitHub URL as though it were the demo URL.**
+- [ ] Provide a URL to a working demo, hosted application, or test build. This is distinct from the source repository URL. A mock-only Windows source package with launcher scripts is being prepared as a downloadable fallback; it requires Python/Node and dependency downloads. It is not hosted and is not a precompiled installer. Confirm with organizers that this package qualifies before entering its archive URL. See [Windows test-build instructions](windows-test-build.md).
 - [ ] Provide a URL to the public source repository. Verify that it is publicly accessible, contains the required files, and displays the Apache-2.0 license in the repository’s About/license area.
 - [ ] Upload the final video to YouTube and make it **Public**. Add that public watch URL to Devpost. The local file is `demo-recordings/submission-recording.mp4`; it is 1920×1080 and 162.545 seconds (2:42.5). Listen through it once for voice clarity, synchronization, and accurate live-versus-mock language. Do not include copyrighted music or third-party marks without permission.
 - [ ] Provide feedback on Nebius Token Factory and the NVIDIA models/tools used. Keep it factual and based on your own experience.
@@ -48,7 +48,7 @@ The form asks for feedback on Nebius Token Factory and the NVIDIA technologies u
 
 ## Pre-submit access check
 
-- [ ] The demo/test-build URL opens on a separate device/network and exposes only the synthetic fixture.
+- [ ] The public test-build archive downloads without authentication, and its instructions are verified on a clean Windows machine; it exposes only the synthetic fixture and uses mock inference.
 - [ ] The URL remains available and free to judges through 2026-12-23.
 - [ ] Login instructions work without sharing personal or production credentials; live paid inference is not available to judges unless separately budgeted and controlled.
 - [ ] The public GitHub repository contains the exact reviewed source, setup instructions, license, and no secrets or local state.
@@ -58,4 +58,4 @@ The form asks for feedback on Nebius Token Factory and the NVIDIA technologies u
 
 ## Important unresolved blocker
 
-The source tree currently documents local-only operation and has no public judge-access URL. The API itself has no authentication; the Next.js dashboard gate does not make it safe to expose FastAPI directly. A compliant externally accessible demo needs a separately reviewed, authenticated hosting/access design and must remain available through the judging period. If that cannot be completed safely before the deadline, contact the organizers/Devpost for clarification rather than exposing loopback services or claiming that the repository is the working demo.
+There is no hosted judge-access URL. The API itself has no authentication; the Next.js dashboard gate does not make it safe to expose FastAPI directly. The downloadable package is a local test build, not a hosted demo, and its acceptance as a test build is unconfirmed. Ask the organizers/Devpost whether this package satisfies the requirement. Do not expose loopback services or describe the package as an always-on application.

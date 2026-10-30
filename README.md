@@ -10,7 +10,11 @@ The local sanitized telemetry database contains a successful Nebius Token Factor
 
 Mock remains the default for local and automated tests. Mock output is labeled as simulated and must never be presented as a Nemotron result. A live request requires explicit provider selection, the separate live-inference switch, a configured server-side credential, and available durable request quota. Request quota limits call count, not dollars.
 
-**Judge access is not yet hosted from this checkout.** The application is configured for loopback-only local use, and no public hosted demo or downloadable test build is configured here. The GitHub source URL does not replace the separate working demo/test-build URL required by the hackathon. Do not expose the local services publicly without the reviewed access controls and hosting setup. The final local video is `demo-recordings/submission-recording.mp4` (1920 × 1080, 2:42.5); it still needs to be uploaded publicly to YouTube, and the resulting URL added to Devpost. See the [submission checklist](docs/hackathon-submission-checklist.md) for remaining items and accurate disclosures.
+**There is no hosted judge-access URL.** The application stays loopback-only. A separate downloadable Windows test package is being prepared below; it runs locally with mock inference and is not a hosted application or precompiled installer. The GitHub source URL does not replace the separate working demo/test-build URL required by the hackathon. Do not expose the local services publicly without reviewed access controls and hosting. The final local video is `demo-recordings/submission-recording.mp4` (1920 × 1080, 2:42.5); it still needs to be uploaded publicly to YouTube, and the resulting URL added to Devpost. See the [submission checklist](docs/hackathon-submission-checklist.md) for remaining items and accurate disclosures.
+
+## Downloadable Windows test build
+
+A mock-only Windows source package with local install/start scripts is being prepared. It requires Python and Node.js, downloads dependencies on first install, runs only on loopback, and does not make live model calls. It is not a hosted application or a precompiled installer. See the [test-build instructions](docs/windows-test-build.md); confirm with the organizers that this source-based package satisfies the separate demo/test-build URL requirement before submitting it.
 
 ## Quick start
 
